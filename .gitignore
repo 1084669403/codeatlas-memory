@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# CodeAtlas internal state (regenerable via `codeatlas scan .`)
+# EN: state.db and detail/ are derived artifacts; history/ is kept in git
+# by design (see .codeatlas/.gitignore generated at scan time).
+# ZH: state.db 与 detail/ 是可再生派生物；history/ 按设计入库
+#（见扫描时生成的 .codeatlas/.gitignore）。
+.codeatlas/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store

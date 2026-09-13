@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codeatlas-memory"
+version = "0.1.0"
+description = "Persistent code index & architecture memory for AI-assisted development"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "CodeAtlas contributors" }]
+keywords = [
+    "code-indexing",
+    "code-memory",
+    "developer-tools",
+    "ai-coding",
+    "tree-sitter",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    # EN: Pinned to 1.x — the API changed between 0.x and 1.0 (init()/get_parser).
+    # ZH: 锁定 1.x —— 0.x 与 1.0 的 API 有变化（init()/get_parser）。
+    "tree-sitter>=0.21,<1",
+    "tree-sitter-language-pack>=1.0,<2",
+    "typer>=0.12",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "pathspec>=0.12",
+]
+
+[project.scripts]
+codeatlas = "codeatlas.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/codeatlas/codeatlas-memory"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codeatlas"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
