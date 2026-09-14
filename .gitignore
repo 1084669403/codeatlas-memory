@@ -15,12 +15,14 @@ venv/
 .coverage
 htmlcov/
 
-# CodeAtlas internal state (regenerable via `codeatlas scan .`)
-# EN: state.db and detail/ are derived artifacts; history/ is kept in git
-# by design (see .codeatlas/.gitignore generated at scan time).
-# ZH: state.db 与 detail/ 是可再生派生物；history/ 按设计入库
-#（见扫描时生成的 .codeatlas/.gitignore）。
-.codeatlas/
+# CodeAtlas internal state
+# EN: state.db and detail/ are regenerable artifacts (ignored); history/ is the
+# durable record and is kept in git by design (.codeatlas/.gitignore mirrors this).
+# ZH: state.db 与 detail/ 是可再生派生物（忽略）；history/ 是持久记录，
+# 按设计入库（.codeatlas/.gitignore 与此一致）。
+.codeatlas/*
+!.codeatlas/history/
+!.codeatlas/.gitignore
 
 # Editors
 .idea/
