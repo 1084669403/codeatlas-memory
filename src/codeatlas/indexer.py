@@ -95,19 +95,37 @@ def diff_file_symbols(
     return changes
 
 
-def detect_renames(changes: list[ChangeRecord]) -> list[ChangeRecord]:
-    """Pair same-file added+removed symbols with identical signatures as renames.
+def _sig_shape(sig: str, name: str) -> str:
+    """Signature with the bare name removed — the rename-comparison shape.
 
-    EN: In-file add/remove pair whose signature keys match -> suspected rename.
-    Replaces the pair with a single RENAMED record (old qname -> new qname).
-    ZH: 同文件内"一删一增且签名相同" -> 疑似重命名；合并为一条 RENAMED 记录
-    （旧限定名 -> 新限定名），供 history 命令跟链。
+    EN: full signature text never matches across a rename because the name is
+    embedded in it; stripping the bare name leaves the comparable shape.
+    ZH: 完整签名在重命名后必然不同（名字嵌在其中）；去掉裸名后剩下的
+    "形状"才是可比部分。
+    """
+    import re
+
+    if name:
+        sig = re.sub(rf"\b{re.escape(name)}\b", "", sig, count=1)
+    return " ".join(sig.split())
+
+
+def detect_renames(changes: list[ChangeRecord]) -> list[ChangeRecord]:
+    """Pair same-file added+removed symbols with identical signature shapes.
+
+    EN: In-file add/remove pair whose name-stripped signatures match ->
+    suspected rename. Replaces the pair with a single RENAMED record
+    (old qname -> new qname).
+    ZH: 同文件内"一删一增且去名签名形状相同" -> 疑似重命名；合并为一条
+    RENAMED 记录（旧限定名 -> 新限定名），供 history 命令跟链。
     """
     ts = _now_iso()
-    removed_by_sig: dict[str, list[ChangeRecord]] = {}
+    removed_by_shape: dict[str, list[ChangeRecord]] = {}
     for ch in changes:
         if ch.change_type == ChangeType.REMOVED and ch.old_value:
-            removed_by_sig.setdefault(ch.old_value, []).append(ch)
+            bare = ch.symbol.rsplit(".", 1)[-1]
+            shape = _sig_shape(ch.old_value, bare)
+            removed_by_shape.setdefault(shape, []).append(ch)
 
     out: list[ChangeRecord] = []
     consumed: set[int] = set()
@@ -115,8 +133,14 @@ def detect_renames(changes: list[ChangeRecord]) -> list[ChangeRecord]:
         if id(ch) in consumed:
             continue
         if ch.change_type == ChangeType.ADDED and ch.new_value:
-            candidates = removed_by_sig.get(ch.new_value, [])
-            match = next((r for r in candidates if id(r) not in consumed), None)
+            bare = ch.symbol.rsplit(".", 1)[-1]
+            candidates = removed_by_shape.get(_sig_shape(ch.new_value, bare), [])
+            # EN: same-file constraint prevents cross-file false pairing.
+            # ZH: 同文件约束避免跨文件误配对。
+            match = next(
+                (r for r in candidates if id(r) not in consumed and r.file == ch.file),
+                None,
+            )
             if match is not None and match.symbol != ch.symbol:
                 consumed.add(id(ch))
                 consumed.add(id(match))
@@ -148,7 +172,9 @@ def _resolve_imports(record: FileRecord, all_paths: set[str]) -> list[tuple[str,
     - js/ts：相对导入 './x' -> 尝试 x.ts/x.js/x/index.ts 等
     仅连接项目内文件；外部依赖跳过。
     """
-    edges: dict[tuple[str, str], int] = {}
+    # EN: (src, dst) -> [count, first_imported_name]
+    # ZH: (src, dst) -> [次数, 第一个导入名]
+    edges: dict[tuple[str, str], list] = {}
     path_set = all_paths
 
     for imp in record.imports:
@@ -174,11 +200,13 @@ def _resolve_imports(record: FileRecord, all_paths: set[str]) -> list[tuple[str,
                 candidates = [Path(c).as_posix() for c in candidates]
         for cand in candidates:
             if cand in path_set:
-                key = (record.path, cand)
-                edges[key] = edges.get(key, 0) + 1
+                slot = edges.setdefault((record.path, cand), [0, imp.names[0] if imp.names else cand])
+                slot[0] += 1
                 break
 
-    return [(s, d, n) for (s, d), n in edges.items()]
+    # EN: one edge per (src,dst); symbol is the first imported name for context.
+    # ZH: 每 (src,dst) 一条边；symbol 取第一个导入名做上下文。
+    return [(s, d, sym, n) for (s, d), (n, sym) in edges.items()]
 
 
 def _build_in_degrees(store: Store) -> dict[str, int]:

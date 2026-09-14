@@ -86,6 +86,9 @@ CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     """Open a connection with WAL + FK enforcement applied."""
+    # EN: tests and API users may pass a nested path that doesn't exist yet.
+    # ZH: 测试与 API 调用方可能传入尚不存在的嵌套路径。
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

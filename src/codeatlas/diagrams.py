@@ -55,6 +55,7 @@ def directory_tree(paths: list[str]) -> str:
     root_id = _node_id("d", "__root__")
     lines = ["graph TD", f'    {root_id}["/"]']
     emitted_dirs: set[str] = set()
+    emitted_edges: set[tuple[str, str]] = set()
 
     for path in sorted(paths):
         parts = path.split("/")
@@ -68,7 +69,10 @@ def directory_tree(paths: list[str]) -> str:
                 name = _clean(dpath.rsplit("/", 1)[-1], 32)
                 lines.append(f'    {_node_id("d", dpath)}["{name}"]')
             cur_id = _node_id("d", dpath)
-            if cur_id != prev_id:
+            # EN: dedupe edges — many files share the same directory chain.
+            # ZH: 边去重 —— 多个文件共享同一条目录链。
+            if cur_id != prev_id and (prev_id, cur_id) not in emitted_edges:
+                emitted_edges.add((prev_id, cur_id))
                 lines.append(f"    {prev_id} --> {cur_id}")
             prev_id = cur_id
         fid = _node_id("f", path)

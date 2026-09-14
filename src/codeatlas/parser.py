@@ -49,6 +49,16 @@ def _text(node) -> str:
     return node.text.decode("utf-8", "replace")
 
 
+def _flatten(text: str) -> str:
+    """Collapse all whitespace (incl. CRLF) to single spaces in signatures.
+
+    EN: source files with CRLF or wrapped declarations would otherwise leak
+    raw newlines into signatures and history docs.
+    ZH: CRLF 或折行声明的源文件否则会把原始换行带进签名与历史文档。
+    """
+    return " ".join(text.split())
+
+
 def _module_name(rel_posix: str) -> str:
     """EN: src/codeatlas/parser.py -> codeatlas.parser (dotted module path).
     ZH: 转成点分模块路径，用于 Python 限定名。"""
@@ -118,11 +128,11 @@ def _parse_py_signature(node) -> tuple[str, str, str]:
     params_node = node.child_by_field_name("parameters")
     ret_node = node.child_by_field_name("return_type")
     name = _text(name_node) if name_node else "<anonymous>"
-    params = _text(params_node) if params_node else "()"
+    params = _flatten(_text(params_node)) if params_node else "()"
     params = params.strip()
     if params == "":
         params = "()"
-    returns = _text(ret_node).strip() if ret_node else ""
+    returns = _flatten(_text(ret_node)).strip() if ret_node else ""
     if node.type == "class_definition":
         sig = f"class {name}"
         bases = _py_class_bases(node)
@@ -147,8 +157,8 @@ def _parse_js_signature(node) -> tuple[str, str, str]:
     params_node = node.child_by_field_name("parameters")
     ret_node = node.child_by_field_name("return_type")
     name = _text(name_node) if name_node else "<anonymous>"
-    params = _text(params_node).strip() if params_node else "()"
-    returns = _text(ret_node).strip() if ret_node else ""
+    params = _flatten(_text(params_node)).strip() if params_node else "()"
+    returns = _flatten(_text(ret_node)).strip() if ret_node else ""
     if returns.startswith(":"):
         returns = returns[1:].strip()
 
@@ -158,7 +168,7 @@ def _parse_js_signature(node) -> tuple[str, str, str]:
         # ZH: 原样追加继承文本（extends/implements）以便阅读。
         for child in node.children:
             if child.type in ("class_heritage", "implements_clause", "extends_clause"):
-                sig += f" {_text(child).strip()}"
+                sig += f" {_flatten(_text(child)).strip()}"
     elif node.type == "interface_declaration":
         sig = f"interface {name}"
     elif node.type == "type_alias_declaration":
@@ -337,8 +347,8 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                 return
             params_node = value.child_by_field_name("parameters")
             ret_node = value.child_by_field_name("return_type")
-            params = _text(params_node).strip() if params_node else "()"
-            returns = _text(ret_node).strip() if ret_node else ""
+            params = _flatten(_text(params_node)).strip() if params_node else "()"
+            returns = _flatten(_text(ret_node)).strip() if ret_node else ""
             # EN: type_annotation text includes the leading ':' — normalize.
             # ZH: type_annotation 文本含前导冒号 —— 统一去除。
             if returns.startswith(":"):

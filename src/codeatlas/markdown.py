@@ -43,7 +43,8 @@ def estimate_tokens(text: str) -> int:
     """
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf")
     other = len(text) - cjk
-    return cjk + max(1, -(-other // 3)) if text else 0
+    other_tokens = -(-other // 3) if other else 0
+    return cjk + other_tokens if text else 0
 
 
 def render_detail_files(
