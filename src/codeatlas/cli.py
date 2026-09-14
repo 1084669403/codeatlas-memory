@@ -19,9 +19,23 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .callgraph import rebuild_call_edges
 from .changelog import write_codeatlas_gitignore, write_history_doc
+from .consistency import run_all_checks
 from .indexer import run_scan, run_update
 from .markdown import render_detail_files, render_overview
+from .memory import (
+    AmbiguousSymbol,
+    PageStatus,
+    ensure_budget,
+    load_budget,
+    load_page,
+    render_page_with_store,
+    render_working_set,
+    save_budget,
+    status as ws_status,
+)
+from .prefetch import prefetch as do_prefetch
 from .storage import Store
 
 app = typer.Typer(
@@ -87,6 +101,11 @@ def scan(
     console.print(
         f"[green]Scanned[/green] {result.files_scanned} file(s), "
         f"{result.symbols_found} symbol(s) -> CODEATLAS.md"
+    )
+    # EN: full rebuild invalidates the working set — say so explicitly (plan v5).
+    # ZH: 全量重建使工作集失效 —— 显式提示（方案 v5）。
+    console.print(
+        "[yellow]项目已重建，工作集已清空。/ Project rebuilt — working set cleared.[/yellow]"
     )
 
 
@@ -283,10 +302,329 @@ def _print_history(store: Store, symbol: str, max_depth: int) -> None:
             depth += 1
 
 
+# ==========================================================================
+# EN: context command group — LLM context virtual memory surface.
+# ZH: context 命令组 —— LLM 上下文虚拟内存入口。
+# ==========================================================================
+
+context_app = typer.Typer(help="LLM context virtual memory: load/status/evict/budget.", no_args_is_help=True)
+app.add_typer(context_app, name="context")
+
+
+def _require_index(path: Path) -> tuple[Path, Store]:
+    """Open the store or exit 1 with the standard no-index message (plan v6)."""
+    root = path.resolve()
+    db = root / ".codeatlas" / "state.db"
+    if not db.is_file():
+        err_console.print(
+            "[red]No index found. Run `codeatlas scan .` first. "
+            "/ 未找到索引，请先运行 `codeatlas scan .`[/red]"
+        )
+        raise typer.Exit(1)
+    return root, Store(db)
+
+
+@context_app.command("load")
+def context_load(
+    symbol: str = typer.Argument(..., help="Qualified/bare symbol name or file path."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    anchor: int | None = typer.Option(None, "--anchor", help="Anchor line for locality."),
+    granularity: str | None = typer.Option(None, "--granularity", help="function | file."),
+    pin: bool = typer.Option(False, "--pin", help="Pin the page against eviction."),
+    no_prefetch: bool = typer.Option(False, "--no-prefetch", help="Skip neighbour prefetch."),
+    source: bool = typer.Option(False, "--source", help="Attach a body excerpt (<=800 tokens)."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of markdown."),
+) -> None:
+    """Load one page into the working set and print it (pure markdown to stdout)."""
+    if granularity not in (None, "function", "file"):
+        err_console.print("[red]--granularity must be 'function' or 'file'[/red]")
+        raise typer.Exit(2)
+    root, store = _require_index(path)
+    try:
+        if anchor is not None:
+            store.set_meta("last_anchor", f"{_anchor_file(store, symbol)}:{anchor}")
+        try:
+            page = load_page(
+                store, symbol, granularity, anchor_line=None, pin=pin, origin="load", with_source=source,
+            )
+        except AmbiguousSymbol as amb:
+            if json_output:
+                import json as _json
+
+                print(_json.dumps({"error": "ambiguous", "candidates": amb.candidates}, ensure_ascii=False))
+            else:
+                err_console.print(f"[yellow]Ambiguous symbol '{symbol}'. Candidates:[/yellow]")
+                for cand in amb.candidates:
+                    err_console.print(f"  - {cand}")
+            raise typer.Exit(2)
+        if page is None:
+            err_console.print(f"[red]Symbol or file not found: {symbol}[/red]")
+            raise typer.Exit(1)
+
+        evicted, unsatisfied = ensure_budget(store)
+        if unsatisfied > 0:
+            err_console.print(
+                f"[yellow]Warning: {unsatisfied} tokens could not be freed — "
+                "consider raising the working-set budget (`context budget --working-set N`).[/yellow]"
+            )
+        for page_id in evicted:
+            err_console.print(f"[dim]evicted: {page_id}[/dim]")
+
+        if not no_prefetch:
+            do_prefetch(store, page)
+
+        from .memory import page_cost as _page_cost
+
+        tokens = _page_cost(page)
+        if json_output:
+            import json as _json
+
+            current_hash = store.get_file_hash(page.file)
+            print(
+                _json.dumps(
+                    {
+                        "page": {
+                            "page_id": page.page_id,
+                            "granularity": page.granularity,
+                            "file": page.file,
+                            "line": page.line,
+                            "end_line": page.end_line,
+                            "signature": page.signature,
+                            "callers": page.callers,
+                            "callees": page.callees,
+                            "related_files": page.related_files,
+                        },
+                        "tokens": tokens,
+                        "stale": bool(current_hash and current_hash != page.version),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            # EN: pure print — no rich folding/ANSI; piping is lossless (v6).
+            # ZH: 纯 print —— 无 rich 折行/ANSI；管道输出无损（v6）。
+            print(render_page_with_store(store, page))
+    finally:
+        store.close()
+
+
+def _anchor_file(store: Store, symbol: str) -> str:
+    """Best-effort file for the anchor meta when --anchor is given."""
+    row = store.symbol_row(symbol)
+    if row is None:
+        matches = store.symbols_by_name(symbol)
+        if len(matches) == 1:
+            return matches[0][0]
+        return symbol
+    return row[0]
+
+
+@context_app.command("status")
+def context_status(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+) -> None:
+    """Show the working set: pages, tokens, recency, stale/gone, budget bar."""
+    _root, store = _require_index(path)
+    try:
+        rows: list[PageStatus] = ws_status(store)
+        b = load_budget(store)
+        table = Table(title="context status / 工作集")
+        table.add_column("Page", style="cyan", no_wrap=True)
+        table.add_column("Gran", no_wrap=True)
+        table.add_column("Tokens", justify="right")
+        table.add_column("Last access", no_wrap=True)
+        table.add_column("State", no_wrap=True)
+        table.add_column("Flags", no_wrap=True)
+        from rich.text import Text
+
+        total_tokens = 0
+        for r in rows:
+            total_tokens += r.tokens
+            flags = []
+            if r.pinned:
+                flags.append("pinned")
+            if r.origin == "prefetch":
+                flags.append("prefetch")
+            state_color = {"fresh": "green", "stale": "yellow", "gone": "red"}.get(r.state, "white")
+            last = r.last_access_at[:19].replace("T", " ")
+            version_note = ""
+            page_row = store.get_page(r.page_id)
+            if page_row is not None:
+                version_note = f" @idx{store.index_version()}"
+            table.add_row(
+                Text(r.page_id),
+                r.granularity,
+                Text(str(r.tokens)),
+                Text(last + version_note),
+                Text(r.state, style=state_color),
+                Text(",".join(flags) if flags else "-"),
+            )
+        console.print(table)
+
+        # EN: budget progress bar (used/total + page headroom).
+        # ZH: 预算进度条（used/total + 页数余量）。
+        from rich.progress import Progress, BarColumn, TextColumn
+
+        pct = min(1.0, total_tokens / b.total) if b.total else 0.0
+        progress = Progress(
+            TextColumn("[bold]budget[/bold]"),
+            BarColumn(),
+            TextColumn(f"{total_tokens}/{b.total} tokens ({pct:.0%})"),
+            TextColumn(
+                f"· pages {len(rows)}/{b.max_pages}"
+                + ("" if len(rows) <= b.max_pages else " [red](over)[/red]")
+            ),
+        )
+        progress.add_task("budget", total=100, completed=pct * 100)
+        console.print(progress)
+
+        if store.evict_count() > 0:
+            ratio = store.evict_count() / b.max_pages if b.max_pages else 0
+            if ratio > 0.4:
+                console.print(
+                    f"[yellow]{store.evict_count()} page(s) evicted (>40% of max-pages) — "
+                    "consider `context budget --working-set N --max-pages M`[/yellow]"
+                )
+    finally:
+        store.close()
+
+
+@context_app.command("evict")
+def context_evict(
+    page_id: str = typer.Argument(None, help="Page to evict (or --all)."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    all_pages: bool = typer.Option(False, "--all", help="Evict every unpinned page."),
+    pin: bool = typer.Option(False, "--pin", help="Pin instead of evict."),
+    unpin: bool = typer.Option(False, "--unpin", help="Unpin the page."),
+    force: bool = typer.Option(False, "--force", help="With --all: evict pinned pages too."),
+) -> None:
+    """Evict pages from the working set (--all keeps pinned; --force evicts all)."""
+    _root, store = _require_index(path)
+    try:
+        if pin or unpin:
+            target = page_id
+            entry = store.get_working_set_entry(target)
+            if entry is None:
+                err_console.print(f"[red]Not in working set: {target}[/red]")
+                raise typer.Exit(1)
+            entry.pinned = pin and True or (False if unpin else entry.pinned)
+            store.upsert_working_set(entry)
+            console.print(f"[green]{'pinned' if pin else 'unpinned'}[/green] {target}")
+            return
+        if all_pages:
+            from .memory import evict as _evict
+
+            entries = store.working_set_entries()
+            if not force:
+                entries = [e for e in entries if not e.pinned]
+            total = sum(e.tokens for e in entries)
+            evicted, _unsat = _evict(store, total)
+            console.print(f"[green]Evicted[/green] {len(evicted)} page(s)")
+            return
+        if not page_id:
+            err_console.print("[red]Provide a page_id or --all[/red]")
+            raise typer.Exit(2)
+        entry = store.get_working_set_entry(page_id)
+        if entry is None:
+            err_console.print(f"[red]Not in working set: {page_id}[/red]")
+            raise typer.Exit(1)
+        if entry.pinned and not force:
+            err_console.print("[yellow]Page is pinned — use --force to evict.[/yellow]")
+            raise typer.Exit(1)
+        store.delete_working_set_entry(page_id)
+        console.print(f"[green]Evicted[/green] {page_id}")
+    finally:
+        store.close()
+
+
+@context_app.command("budget")
+def context_budget(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    total: int | None = typer.Option(None, "--total", help="Merged-output token cap."),
+    working_set: int | None = typer.Option(None, "--working-set", help="Resident eviction budget."),
+    max_pages: int | None = typer.Option(None, "--max-pages", help="Max resident pages."),
+) -> None:
+    """Show or adjust the token budget (no args = show current)."""
+    _root, store = _require_index(path)
+    try:
+        b = load_budget(store)
+        if total is None and working_set is None and max_pages is None:
+            console.print(f"total: {b.total} tokens (merged output cap / 合并输出上限)")
+            console.print(f"working-set: {b.working_set} tokens (eviction budget / 淘汰预算)")
+            console.print(f"max-pages: {b.max_pages}")
+            return
+        if total is not None:
+            b.total = total
+        if working_set is not None:
+            b.working_set = working_set
+        if max_pages is not None:
+            b.max_pages = max_pages
+        save_budget(store, b)
+        console.print(f"[green]Budget saved:[/green] total={b.total} working-set={b.working_set} max-pages={b.max_pages}")
+    finally:
+        store.close()
+
+
+@context_app.command("ws")
+def context_ws(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    lang: str = "en",
+) -> None:
+    """Print the merged working set (render_working_set) as markdown."""
+    _root, store = _require_index(path)
+    try:
+        print(render_working_set(store, lang))
+    finally:
+        store.close()
+
+
 @app.command()
-def serve() -> None:
-    """(Placeholder) LSP server — planned for Phase 3."""
-    console.print("[yellow]LSP server is planned for Phase 3. / LSP 服务器计划于第三阶段实现。[/yellow]")
+def doctor(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+) -> None:
+    """Run consistency invariants; exit 1 on violations."""
+    root, store = _require_index(path)
+    try:
+        history_dir = root / ".codeatlas" / "history"
+        problems = run_all_checks(store, root, history_dir if history_dir.is_dir() else None)
+        # EN: budget/callgraph advice (plan: 淘汰率建议 + 解析率报告).
+        # ZH: 预算/调用图建议（方案：淘汰率建议 + 解析率报告）。
+        b = load_budget(store)
+        entries = store.working_set_entries()
+        used = sum(e.tokens for e in entries)
+        if used > b.working_set:
+            problems.append(
+                f"working set {used} tokens exceeds budget {b.working_set} — run `context evict --all`"
+            )
+        rate_raw = store.get_meta("call_resolution_rate")
+        if rate_raw:
+            console.print(f"[dim]call resolution rate: {float(rate_raw):.0%}[/dim]")
+    finally:
+        store.close()
+
+    if problems:
+        for p in problems:
+            err_console.print(f"[red]✗[/red] {p}")
+        raise typer.Exit(1)
+    console.print("[green]All consistency checks passed. / 一致性检查全部通过。[/green]")
+
+
+@app.command()
+def serve(
+    lsp: bool = typer.Option(False, "--lsp", help="Run in LSP mode (placeholder shape)."),
+) -> None:
+    """(Placeholder) LSP/MCP server — planned for Phase 3."""
+    if lsp:
+        console.print(
+            "[yellow]LSP server is planned for Phase 3. / LSP 服务器计划于第三阶段实现。[/yellow]"
+        )
+    else:
+        console.print(
+            "[yellow]Server mode is planned for Phase 3. / 服务器模式计划于第三阶段实现。[/yellow]"
+        )
+    console.print(
+        "[dim]Planned MCP tools: codeatlas_load_page / get_working_set / evict_page / prefetch[/dim]"
+    )
     raise typer.Exit(0)
 
 
@@ -294,6 +632,9 @@ def serve() -> None:
 def mcp() -> None:
     """(Placeholder) MCP server — planned for Phase 3."""
     console.print("[yellow]MCP server is planned for Phase 3. / MCP 服务器计划于第三阶段实现。[/yellow]")
+    console.print(
+        "[dim]Planned MCP tools: codeatlas_load_page / get_working_set / evict_page / prefetch[/dim]"
+    )
     raise typer.Exit(0)
 
 

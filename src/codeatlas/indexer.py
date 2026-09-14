@@ -10,20 +10,64 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import (
+    BODY_MAX_BYTES,
     ChangeRecord,
     ChangeType,
     FileRecord,
     ScanResult,
     Symbol,
 )
+from .callgraph import rebuild_call_edges
 from .parser import parse_file
 from .scanner import scan_files
 from .storage import Store
 from .summarizer import RuleSummarizer, enrich
 
 
+def invalidate_stale(store: Store) -> int:
+    """Mark stale/gone pages after an update (implemented in memory.py).
+
+    EN: imported lazily to keep indexer's import graph simple until memory
+    exists; memory.py will own the real logic.
+    ZH: 惰性导入以保持 indexer 的依赖图简单；真实逻辑由 memory.py 拥有。
+    """
+    from .memory import invalidate_stale as _invalidate
+
+    return _invalidate(store)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _body_diff_detail(old_body: str, new_body: str) -> str:
+    """Render "+N/-M" for two normalized bodies (difflib, stdlib only)."""
+    import difflib
+
+    diff = difflib.unified_diff(
+        old_body.splitlines(), new_body.splitlines(), lineterm="", n=0
+    )
+    added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+    return f"+{added}/-{removed}"
+
+
+def _body_comparable(old_body: str, new_body: str) -> bool:
+    """Whether a body-level diff comparison is meaningful.
+
+    EN: migrated baselines carry body='' (pre-v2 rows) — writing the new body
+    silently without recording a diff avoids noise (plan P1-1). Truncated
+    bodies (64KB cap) also skip the diff.
+    ZH: 迁移基线的旧行 body=''（v2 之前的行）—— 静默写入新 body、不记
+    diff，避免噪音（方案 P1-1）。被截断的体（64KB 上限）同样跳过 diff。
+    """
+    if not old_body:
+        return False  # migration baseline: silent write
+    truncated = (
+        len(new_body.encode("utf-8", "replace")) >= BODY_MAX_BYTES
+        or len(old_body.encode("utf-8", "replace")) >= BODY_MAX_BYTES
+    )
+    return not truncated
 
 
 def diff_file_symbols(
@@ -31,10 +75,13 @@ def diff_file_symbols(
 ) -> list[ChangeRecord]:
     """Diff stored symbol tuples vs a freshly parsed FileRecord.
 
-    EN: old_syms rows: (file, qualified_name, name, kind, signature, params,
-    returns, role). Uses qualified names as diff keys (SCIP-style) to avoid
-    cross-file same-name false positives.
-    ZH: 以限定名为 diff 键（SCIP 风格），避免跨文件同名误报。
+    EN: old_syms rows come from symbols_for_file_full (13 fields incl. body).
+    Uses qualified names as diff keys (SCIP-style). Signature-stable symbols
+    get SIGNATURE_STABLE only when the normalized body really changed, with
+    detail="+N/-M" (plan MVP gap 1).
+    ZH: old_syms 行来自 symbols_for_file_full（13 字段，含 body）。
+    以限定名为 diff 键（SCIP 风格）。签名未变的符号仅在体真实变化时记
+    SIGNATURE_STABLE，detail="+N/-M"（方案 MVP 缺口 1）。
     """
     ts = _now_iso()
     changes: list[ChangeRecord] = []
@@ -67,7 +114,7 @@ def diff_file_symbols(
                 )
             )
             continue
-        _, _, _, _, old_sig, old_params, old_returns, _ = old_by_qname[qname]
+        _, _, _, _, old_sig, old_params, old_returns, _, _, _, _, _, old_body = old_by_qname[qname]
         if old_sig != sym.signature or old_params != sym.params or old_returns != sym.returns:
             changes.append(
                 ChangeRecord(
@@ -79,9 +126,10 @@ def diff_file_symbols(
                     new_value=sym.signature,
                 )
             )
-        else:
-            # EN: signature unchanged — body may still differ; classify honestly.
-            # ZH: 签名未变 —— 函数体可能已变化；如实分类，不称"仅格式"。
+        elif _body_comparable(old_body, sym.body) and old_body != sym.body:
+            # EN: signature unchanged but body really changed — record with
+            # line counts so history shows body-level edits (honest change log).
+            # ZH: 签名未变但体真实变化 —— 记录行数，让历史呈现体级修改。
             changes.append(
                 ChangeRecord(
                     ts=ts,
@@ -90,6 +138,7 @@ def diff_file_symbols(
                     change_type=ChangeType.SIGNATURE_STABLE,
                     old_value=old_sig,
                     new_value=sym.signature,
+                    detail=_body_diff_detail(old_body, sym.body),
                 )
             )
     return changes
@@ -258,14 +307,22 @@ def run_scan(
                 )
             )
     for record in parsed_records:
+        store.replace_raw_calls(record.path, record.calls)
         edges = _resolve_imports(record, all_rel_paths)
         if edges:
             store.replace_refs_for_file(record.path, edges)
 
     store.append_changes(changes)
     store.set_meta("lang", output_lang)
-    store.set_meta("schema_version", str(1))
+    store.set_meta("schema_version", str(2))
     store.set_meta("last_scan", ts)
+    # EN: full rebuild invalidates the working set (pages stats stay) and
+    # rewrites the call graph from the fresh raw_calls.
+    # ZH: 全量重建使工作集失效（pages 统计保留），并用新 raw_calls 重写调用图。
+    store.clear_working_set()
+    rebuild_call_edges(store)
+    store.bump_index_version()
+    store.reset_evict_count()
     result.changes = changes
     return result
 
@@ -343,14 +400,20 @@ def run_update(
             )
         store.delete_file(path)
         store.conn.execute("DELETE FROM refs WHERE src_file = ? OR dst_file = ?", (path, path))
+        # EN: sweep raw calls of deleted files — prevents orphan accumulation
+        # and keeps call_edges rebuild clean (plan v5).
+        # ZH: 清理被删文件的 raw calls —— 防孤儿累积，保持 call_edges
+        # 重算干净（方案 v5）。
+        store.delete_raw_calls(path)
 
     for record in changed_records:
-        old_syms = store.symbols_for_file(record.path)
+        old_syms = store.symbols_for_file_full(record.path)
         file_changes = diff_file_symbols(old_syms, record)
         # EN: only log body-level counts for signature-stable symbols via detail.
         # ZH: 对签名未变的符号在 detail 中记录体级变化行数。
         store.upsert_file(record, ts)
         changes.extend(file_changes)
+        store.replace_raw_calls(record.path, record.calls)
         edges = _resolve_imports(record, all_rel_paths)
         store.replace_refs_for_file(record.path, edges)
         result.symbols_found += len(record.symbols)
@@ -362,7 +425,15 @@ def run_update(
     changes = detect_renames(changes)
     store.append_changes(changes)
     store.set_meta("last_update", ts)
-
+    # EN: call graph rewrite from the persisted raw_calls (P0-2: unchanged
+    # files keep their raw calls, so a full rebuild is safe and cheap), then
+    # staleness invalidation and version bump.
+    # ZH: 基于持久化的 raw_calls 重写调用图（P0-2：未变更文件的 raw calls
+    # 保留，全量重算安全且廉价），随后失效处理与版本递增。
+    rebuild_call_edges(store)
+    invalidated = invalidate_stale(store)
+    store.bump_index_version()
+    store.reset_evict_count()
     result.changes = changes
     result.files_parsed = len(changed_records)
     return result

@@ -73,6 +73,79 @@ class Symbol:
     language: str = ""
     docstring: str = ""  # EN: raw docstring/JSDoc first paragraph / ZH: 原始文档字符串
     bases: list[str] = field(default_factory=list)  # EN: class bases/implements / ZH: 基类
+    # EN: normalized function body (CRLF->LF; 64KB truncation) — the first link
+    # of the body-level diff chain (parser -> storage -> indexer diff).
+    # ZH: 归一化函数体（CRLF->LF；64KB 截断）—— 体级 diff 链路第一环
+    # （parser -> storage -> indexer diff）。file 级页不用。
+    body: str = ""
+
+
+# EN: body extraction cap — huge bodies are low-value for diffing/rendering.
+# ZH: 函数体提取上限 —— 超大体对 diff/渲染价值低。
+BODY_MAX_BYTES = 64 * 1024
+
+
+@dataclass
+class CallEdge:
+    """A raw call edge produced by parser stage A (persisted to raw_calls).
+
+    EN: callee_raw is the call text as written (e.g. "self.complete", "helper");
+    resolution to a qualified callee happens later in callgraph stage B.
+    ZH: callee_raw 是调用点的原始文本（如 "self.complete"、"helper"）；
+    解析为限定名发生在 callgraph 阶段 B。
+    """
+
+    src_qname: str  # EN: caller qualified name / ZH: 调用方限定名
+    callee_raw: str  # EN: call text as written / ZH: 调用原文
+    line: int  # 1-based
+
+
+@dataclass
+class Page:
+    """A virtual-memory page: one loadable unit of code context.
+
+    EN: page_id is a qualified name (function granularity) or a repo path
+    (file granularity); version is the file hash at load time and is the
+    staleness criterion.
+    ZH: page_id 是限定名（function 粒度）或仓库路径（file 粒度）；
+    version 是加载时的文件 hash，作为失效判据。
+    """
+
+    page_id: str
+    granularity: str  # function | file  (module-level pages are out of scope)
+    file: str
+    line: int
+    end_line: int
+    signature: str
+    summary: str
+    role: str
+    language: str
+    version: str  # file hash at load time
+    callers: list[str] = field(default_factory=list)
+    callees: list[str] = field(default_factory=list)
+    related_files: list[str] = field(default_factory=list)
+    source: str = ""  # EN: optional body excerpt (--source) / ZH: 可选函数体摘录（--source）
+
+
+@dataclass
+class WorkingSetEntry:
+    """One resident page in the working set (virtual-memory page table row).
+
+    EN: origin records how the page entered the set ("load" | "prefetch");
+    prefetch pages get a recency discount during eviction. Locality is NOT
+    stored — it is computed against meta['last_anchor'] at eviction time so
+    that a single global anchor serves all processes.
+    ZH: origin 记录页面进入方式（"load" | "prefetch"）；预取页在淘汰时打
+    recency 折扣。locality 不落库 —— 淘汰时对 meta['last_anchor'] 现算，
+    全局唯一锚点，消除多进程下的排序歧义。
+    """
+
+    page_id: str
+    loaded_at: str
+    last_access_at: str
+    pinned: bool = False
+    tokens: int = 0
+    origin: str = "load"  # load | prefetch
 
 
 @dataclass
@@ -87,6 +160,11 @@ class FileRecord:
     symbols: list[Symbol] = field(default_factory=list)
     imports: list[Import] = field(default_factory=list)
     role: str = Role.MODULE.value
+    # EN: raw call edges from inside symbol bodies (stage-A input; module-level
+    # calls outside functions are NOT collected — plan P2-11).
+    # ZH: 符号体内采集的原始调用边（阶段 A 原料；函数体外的模块级调用
+    # 不采集 —— 方案 P2-11）。
+    calls: list[CallEdge] = field(default_factory=list)
 
 
 @dataclass

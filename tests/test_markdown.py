@@ -24,7 +24,7 @@ def test_overview_structure(tmp_path: Path) -> None:
     render_overview(tmp_path, store, run_scan(tmp_path, store), out, lang="en")
     text = out.read_text(encoding="utf-8")
     assert text.startswith("---\n")  # frontmatter
-    assert text.count("```mermaid") == 3
+    assert text.count("```mermaid") == 4  # tree + deps + inherit + call graph
     assert "## Files" in text
     assert "`a.py`" in text
     assert "codeatlas scan ." in text  # regenerate hint for teammates

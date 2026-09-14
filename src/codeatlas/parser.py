@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tree_sitter_language_pack import get_parser
 
-from .models import FileRecord, Import, Symbol, SymbolKind
+from .models import BODY_MAX_BYTES, CallEdge, FileRecord, Import, Symbol, SymbolKind
 from .scanner import EXTENSION_TO_LANGUAGE
 
 # EN: node type -> kind mapping, per language family.
@@ -105,6 +105,110 @@ def _first_docstring(body_node) -> str:
         if child.type not in ("comment",):
             return ""
     return ""
+
+
+# --------------------------------------------------------------------------
+# EN: call extraction + body extraction (virtual-memory stage A).
+# ZH: 调用提取 + 函数体提取（虚拟内存阶段 A）。
+# --------------------------------------------------------------------------
+
+def _normalize_body(raw: str) -> str:
+    """Normalize a function body for storage/diffing.
+
+    EN: CRLF/CR -> LF, then cap at 64KB (byte-based). Normalization happens at
+    extraction time so every downstream consumer sees the same text.
+    ZH: CRLF/CR -> LF，再按 64KB（字节）截断。提取时即归一化，保证下游
+    所有消费方看到同一份文本。
+    """
+    normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+    if len(normalized.encode("utf-8", "replace")) > BODY_MAX_BYTES:
+        return normalized.encode("utf-8")[:BODY_MAX_BYTES].decode("utf-8", "ignore")
+    return normalized
+
+
+def _body_text(body_node) -> str:
+    """Extract and normalize the body text of a function-like node."""
+    if body_node is None:
+        return ""
+    return _normalize_body(_text(body_node))
+
+
+# EN: Python call expression shape: call(arguments). callee = function field
+# (identifier/attribute) — arguments are NOT traversed so nested calls like
+# f(g(x)) attribute g(x) to its own line and we still catch it as a separate
+# call only if we walk; plan says collect call text as written, one per call node.
+# ZH: Python 调用表达式形态：call(arguments)。callee 取 function 字段
+# （identifier/attribute）。
+def _py_calls_in_body(src_qname: str, body_node) -> list[CallEdge]:
+    """Collect raw call edges from a Python function body (non-recursive walk
+    of the body, recursive within nested call chains)."""
+    if body_node is None:
+        return []
+    edges: list[CallEdge] = []
+
+    def visit(node) -> None:
+        if node.type == "call":
+            func = node.child_by_field_name("function")
+            if func is not None and func.type in ("identifier", "attribute"):
+                edges.append(
+                    CallEdge(
+                        src_qname=src_qname,
+                        callee_raw=_text(func).strip(),
+                        line=node.start_point[0] + 1,
+                    )
+                )
+            # EN: still descend — chained/nested calls each get their own edge.
+            # ZH: 继续下钻 —— 链式/嵌套调用各自成边。
+            for child in node.children:
+                visit(child)
+            return
+        # EN: do not descend into nested function/class definitions — their
+        # calls belong to the inner symbol.
+        # ZH: 不进入嵌套函数/类定义 —— 其调用属于内层符号。
+        if node.type in ("function_definition", "class_definition"):
+            return
+        for child in node.children:
+            visit(child)
+
+    visit(body_node)
+    return edges
+
+
+def _js_calls_in_body(src_qname: str, body_node) -> list[CallEdge]:
+    """Collect raw call edges from a JS/TS function/method body."""
+    if body_node is None:
+        return []
+    edges: list[CallEdge] = []
+
+    def visit(node) -> None:
+        if node.type == "call_expression":
+            func = node.child_by_field_name("function")
+            if func is not None and func.type in (
+                "identifier",
+                "member_expression",
+            ):
+                edges.append(
+                    CallEdge(
+                        src_qname=src_qname,
+                        callee_raw=_text(func).strip(),
+                        line=node.start_point[0] + 1,
+                    )
+                )
+            for child in node.children:
+                visit(child)
+            return
+        if node.type in (
+            "function_declaration",
+            "function_expression",
+            "arrow_function",
+            "class_declaration",
+        ):
+            return  # inner symbols own their calls
+        for child in node.children:
+            visit(child)
+
+    visit(body_node)
+    return edges
 
 
 def _preceding_jsdoc(siblings, index: int) -> str:
@@ -271,6 +375,7 @@ def _extract_py_imports(root) -> list[Import]:
 def _python_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
     """Extract symbols from a Python AST (top-level + class methods)."""
     symbols: list[Symbol] = []
+    calls: list[CallEdge] = []  # virtual-memory stage A output
     module = _module_name(rel_posix)
 
     def visit(node, class_prefix: str, parent_siblings=None):
@@ -293,8 +398,10 @@ def _python_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                         line=child.start_point[0] + 1,
                         end_line=child.end_point[0] + 1,
                         language="python",
+                        body=_body_text(child.child_by_field_name("body")),
                     )
                 )
+                calls.extend(_py_calls_in_body(qual, child.child_by_field_name("body")))
             elif child.type == "class_definition":
                 sig, params, _ = _parse_py_signature(child)
                 name = _text(child.child_by_field_name("name"))
@@ -322,12 +429,13 @@ def _python_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                     visit(body, f"{class_prefix}{name}.")
 
     visit(root, "")
-    return symbols
+    return symbols, calls
 
 
-def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
+def _js_symbols(rel_posix: str, source: bytes, root) -> tuple[list[Symbol], list[CallEdge]]:
     """Extract symbols from a JS/TS AST (top-level + class members + TS types)."""
     symbols: list[Symbol] = []
+    calls: list[CallEdge] = []  # virtual-memory stage A output
     module = _js_module_key(rel_posix)
     language = "typescript" if rel_posix.endswith((".ts", ".tsx")) else "javascript"
 
@@ -368,8 +476,10 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                     line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     language=language,
+                    body=_body_text(value.child_by_field_name("body")),
                 )
             )
+            calls.extend(_js_calls_in_body(qual, value.child_by_field_name("body")))
             return
         if t not in JS_SYMBOL_NODES:
             return
@@ -390,8 +500,11 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                 line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
                 language=language,
+                body=_body_text(node.child_by_field_name("body")),
             )
         )
+        if t in ("function_declaration",):
+            calls.extend(_js_calls_in_body(qual, node.child_by_field_name("body")))
         if t in ("class_declaration", "abstract_class_declaration"):
             body = node.child_by_field_name("body")
             if body is not None:
@@ -405,6 +518,7 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                 name_node = child.child_by_field_name("name")
                 name = _text(name_node).strip() if name_node else "<anonymous>"
                 qual = f"{module}.{class_name}.{name}"
+                method_body = child.child_by_field_name("body")
                 add_symbol(
                     Symbol(
                         qualified_name=qual,
@@ -417,8 +531,10 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                         line=child.start_point[0] + 1,
                         end_line=child.end_point[0] + 1,
                         language=language,
+                        body=_body_text(method_body),
                     )
                 )
+                calls.extend(_js_calls_in_body(qual, method_body))
             elif child.type == "public_field_definition":
                 name_node = child.child_by_field_name("name")
                 value = child.child_by_field_name("value")
@@ -427,6 +543,7 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                     params_node = value.child_by_field_name("parameters")
                     params = _text(params_node).strip() if params_node else "()"
                     qual = f"{module}.{class_name}.{name}"
+                    field_body = value.child_by_field_name("body")
                     add_symbol(
                         Symbol(
                             qualified_name=qual,
@@ -439,8 +556,10 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                             line=child.start_point[0] + 1,
                             end_line=child.end_point[0] + 1,
                             language=language,
+                            body=_body_text(field_body),
                         )
                     )
+                    calls.extend(_js_calls_in_body(qual, field_body))
             elif child.type in ("abstract_class_declaration", "class_declaration"):
                 # nested class
                 handle_declaration(child, f"{class_name}.")
@@ -487,7 +606,7 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
                 visit(child)
 
     visit(root)
-    return symbols
+    return symbols, calls
 
 
 def parse_file(root: Path, file_path: Path) -> FileRecord:
@@ -512,10 +631,10 @@ def parse_file(root: Path, file_path: Path) -> FileRecord:
     tree = parser.parse(source)
 
     if language == "python":
-        symbols = _python_symbols(rel_posix, source, tree.root_node)
+        symbols, calls = _python_symbols(rel_posix, source, tree.root_node)
         imports = _extract_py_imports(tree.root_node)
     else:
-        symbols = _js_symbols(rel_posix, source, tree.root_node)
+        symbols, calls = _js_symbols(rel_posix, source, tree.root_node)
         imports = _extract_js_imports(tree.root_node)
 
     stat = file_path.stat()
@@ -527,4 +646,5 @@ def parse_file(root: Path, file_path: Path) -> FileRecord:
         size=stat.st_size,
         symbols=symbols,
         imports=imports,
+        calls=calls,
     )

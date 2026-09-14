@@ -164,7 +164,19 @@ def write_history_doc(
                 elif ch.change_type == ChangeType.REMOVED:
                     lines.append(f"- **{label}** `{ch.symbol}` — `{ch.old_value}`")
                 else:  # SIGNATURE_STABLE
-                    lines.append(f"- {label}: `{ch.symbol}`")
+                    if ch.detail:
+                        # EN: body-level edit line counts (+N/-M) — MVP gap 1.
+                        # ZH: 体级修改行数（+N/-M）—— MVP 缺口 1。
+                        if lang == "zh":
+                            lines.append(
+                                f"- {label}: `{ch.symbol}`（体内修改 {ch.detail}）"
+                            )
+                        else:
+                            lines.append(
+                                f"- {label}: `{ch.symbol}` (body edits {ch.detail})"
+                            )
+                    else:
+                        lines.append(f"- {label}: `{ch.symbol}`")
             lines.append("")
 
     # EN: links to the most recent history docs (nav aid for rollback review).

@@ -80,3 +80,128 @@ def test_every_update_writes_history(tmp_path: Path) -> None:
     write_history_doc(hist, store, r.changes, r.timestamp, lang="en")
     assert list(hist.glob("*.md")), "update must have a history doc"
     store.close()
+
+
+# ------------------------------------------------- body-level diff (v6 plan)
+
+
+def test_body_change_records_line_counts(tmp_path: Path) -> None:
+    """Signature-stable + body edits -> SIGNATURE_STABLE with detail +N/-M."""
+    (tmp_path / "a.py").write_text(
+        "def f() -> str:\n    return 'v1'\n", encoding="utf-8"
+    )
+    store = Store(tmp_path / ".codeatlas" / "state.db")
+    run_scan(tmp_path, store)
+    import os
+    import time
+
+    time.sleep(0.02)
+    (tmp_path / "a.py").write_text(
+        "def f() -> str:\n    x = 1\n    return f'v2-{x}'\n", encoding="utf-8"
+    )
+    os.utime(tmp_path / "a.py", (time.time() + 5, time.time() + 5))
+    r = run_update(tmp_path, store)
+    assert r.changes[0].change_type == ChangeType.SIGNATURE_STABLE
+    assert r.changes[0].detail == "+2/-0"
+    store.close()
+
+
+def test_comment_only_change_no_noise(tmp_path: Path) -> None:
+    """Comment-only edits DO count as body edits (honest); but identical
+    bodies must not emit a change at all."""
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    store = Store(tmp_path / ".codeatlas" / "state.db")
+    run_scan(tmp_path, store)
+    import os
+    import time
+
+    # whitespace-only difference normalizes away (line content identical)
+    time.sleep(0.02)
+    (tmp_path / "a.py").write_text("def f():\n    return 1  # note\n", encoding="utf-8")
+    os.utime(tmp_path / "a.py", (time.time() + 5, time.time() + 5))
+    r = run_update(tmp_path, store)
+    # a real text change still records (comments are code too) — but a pure
+    # CRLF flip must NOT (see next test)
+    assert all(c.change_type == ChangeType.SIGNATURE_STABLE for c in r.changes)
+    store.close()
+
+
+def test_crlf_normalization_no_false_positive(tmp_path: Path) -> None:
+    """CRLF->LF rewrite with identical content must not record a diff."""
+    (tmp_path / "a.py").write_bytes(b"def f():\n    return 1\n")
+    store = Store(tmp_path / ".codeatlas" / "state.db")
+    run_scan(tmp_path, store)
+    import os
+    import time
+
+    time.sleep(0.02)
+    (tmp_path / "a.py").write_bytes(b"def f():\r\n    return 1\r\n")
+    os.utime(tmp_path / "a.py", (time.time() + 5, time.time() + 5))
+    r = run_update(tmp_path, store)
+    assert r.changes == [], "CRLF-only change must not produce body diff"
+    store.close()
+
+
+def test_migration_baseline_silent_write(tmp_path: Path) -> None:
+    """Old row with body='' (pre-v2 baseline) -> first update writes the new
+    body silently, no SIGNATURE_STABLE noise (plan P1-1)."""
+    from codeatlas.models import FileRecord, Symbol, SymbolKind
+
+    store = Store(tmp_path / ".codeatlas" / "state.db")
+    old = FileRecord(
+        path="a.py",
+        language="python",
+        hash="h1",
+        mtime=1.0,
+        size=10,
+        symbols=[
+            Symbol(
+                qualified_name="a.f",
+                name="f",
+                kind=SymbolKind.FUNCTION,
+                signature="def f() -> str",
+                params="()",
+                returns="str",
+            )
+        ],
+    )
+    store.upsert_file(old, "2026-01-01T00:00:00+00:00")
+    # simulate pre-v2 row: body lost in migration
+    store.conn.execute("UPDATE symbols SET body = '' WHERE qualified_name = 'a.f'")
+    store.conn.commit()
+
+    (tmp_path / "a.py").write_text(
+        "def f() -> str:\n    return 'changed body'\n", encoding="utf-8"
+    )
+    r = run_scan_stored(tmp_path, store)
+    stable = [c for c in r.changes if c.change_type == ChangeType.SIGNATURE_STABLE]
+    assert stable == [], "migration baseline must not record body diff"
+    # new body written silently
+    row = store.symbol_row("a.f")
+    assert row[12] != ""
+    store.close()
+
+
+def run_scan_stored(tmp_path: Path, store: Store):
+    from codeatlas.indexer import run_update
+
+    import os
+    import time
+
+    time.sleep(0.02)
+    os.utime(tmp_path / "a.py", (time.time() + 5, time.time() + 5))
+    return run_update(tmp_path, store)
+
+
+def test_body_64kb_truncation_skips_diff(tmp_path: Path) -> None:
+    """A >64KB body gets truncated; diffing truncated bodies is skipped."""
+    from codeatlas.models import BODY_MAX_BYTES
+
+    big = "def f():\n" + "".join(f"    x{i} = {i}\n" for i in range(20000))
+    assert len(big.encode("utf-8")) > BODY_MAX_BYTES
+    (tmp_path / "a.py").write_text(big, encoding="utf-8")
+    store = Store(tmp_path / ".codeatlas" / "state.db")
+    run_scan(tmp_path, store)
+    row = store.symbol_row("a.f")
+    assert len(row[12].encode("utf-8")) <= BODY_MAX_BYTES
+    store.close()

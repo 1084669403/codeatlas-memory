@@ -142,6 +142,41 @@ def inheritance_graph(classes: list[tuple[str, str, list[str]]]) -> str:
     return "\n".join(lines)
 
 
+def call_graph(
+    edges: list[tuple[str, str, int]],
+    nodes: list[str],
+    max_edges: int = 40,
+) -> str:
+    """Render the call graph as an approximate Mermaid flowchart.
+
+    EN: resolution is heuristic, so the first line carries the '%% approximate'
+    marker and edges are capped at max_edges for readability. Unresolved
+    callees never appear (edges only between known nodes).
+    ZH: 解析为启发式，首行带 '%% approximate' 标记；边按 max_edges 封顶
+    保证可读性。未解析的调用不出现（边只在已知节点间画）。
+    """
+    lines = ["%% approximate", "flowchart TD"]
+    node_set = set(nodes)
+    emitted: set[str] = set()
+    shown = 0
+    for src, dst, count in sorted(edges, key=lambda e: (-e[2], e[0], e[1])):
+        if src not in node_set or dst not in node_set:
+            continue
+        if shown >= max_edges:
+            lines.append(f'    more_{shown}["… {max_edges}+ edges (see call_edges table)"]')
+            break
+        for qname in (src, dst):
+            if qname not in emitted:
+                emitted.add(qname)
+                short = _clean(qname.rsplit(".", 1)[-1], 32)
+                lines.append(f'    {_node_id("cg", qname)}["{short}"]')
+        lines.append(f'    {_node_id("cg", src)} -->|"{_clean(str(count), 8)}"| {_node_id("cg", dst)}')
+        shown += 1
+    if not emitted:
+        lines.append('    empty["no resolved call edges"]')
+    return "\n".join(lines)
+
+
 def build_all_diagrams(store: Store) -> dict[str, str]:
     """Convenience: build all three diagrams from the current store state."""
     import json
@@ -160,4 +195,7 @@ def build_all_diagrams(store: Store) -> dict[str, str]:
         "tree": directory_tree(paths),
         "deps": dependency_graph(ref_rows, paths),
         "inherit": inheritance_graph(classes),
+        "calls": call_graph(store.all_call_edges(), [r[0] for r in store.conn.execute(
+            "SELECT qualified_name FROM symbols"
+        ).fetchall()]),
     }

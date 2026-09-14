@@ -33,18 +33,16 @@ def _detail_filename(module: str) -> str:
 
 
 def estimate_tokens(text: str) -> int:
-    """CJK-aware token estimation for budget pruning.
+    """CJK-aware token estimation — moved to budget.py; re-exported here.
 
-    EN: CJK chars ~1 token each; other chars ~3.3 chars/token (code density).
-    A flat len/4 undercounts Chinese by 3-4x — this estimator is required
-    for --max-tokens to work with --lang zh output.
-    ZH: CJK 字符约 1 token/字；其余约 3.3 字符/token（代码密度）。
-    简单 len/4 会把中文低估 3-4 倍 —— --lang zh 输出必须用此估算器。
+    EN: budget.py is the single implementation; this re-export keeps
+    `from codeatlas.markdown import estimate_tokens` working (plan step 10).
+    ZH: budget.py 是唯一实现；此处 re-export 保持既有导入路径可用
+    （方案第 10 步）。
     """
-    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf")
-    other = len(text) - cjk
-    other_tokens = -(-other // 3) if other else 0
-    return cjk + other_tokens if text else 0
+    from .budget import estimate_tokens as _estimate
+
+    return _estimate(text)
 
 
 def render_detail_files(
@@ -202,6 +200,18 @@ def render_overview(
     lines.append("")
     lines.append("```mermaid")
     lines.append(diagrams["inherit"])
+    lines.append("```")
+    lines.append("")
+    # EN: 4th diagram — call graph (heuristic resolution, marked approximate).
+    # ZH: 第 4 张图 —— 调用图（启发式解析，标注 approximate）。
+    lines.append(
+        "### 调用图（近似）/ Call Graph (approximate)"
+        if lang == "zh"
+        else "### Call Graph (approximate)"
+    )
+    lines.append("")
+    lines.append("```mermaid")
+    lines.append(diagrams["calls"])
     lines.append("```")
     lines.append("")
 
