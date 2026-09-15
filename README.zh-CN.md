@@ -18,9 +18,11 @@ AI 编程工具（Codex、Cursor 等）的上下文窗口有限。面对大型�
 CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
 
 - 分层 Markdown 索引（`CODEATLAS.md` 总览 + 按模块拆分的明细）；
-- Mermaid 图（目录树、模块依赖、类继承），人与 AI 都能看懂；
+- Mermaid 图（目录树、模块依赖、类继承、调用图），人与 AI 都能看懂；
 - 符号级变更历史（old → new，按次记录，可支撑回滚）；
-- 符号关键字搜索（中英文均可）。
+- 符号关键字搜索（中英文均可）；
+- LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
+  预算的工作集，支持 LRU 置换与邻居预取。
 
 AI coding tools (Codex, Cursor, …) have a limited context window. On large
 codebases they re-read files on every task, waste tokens, and lose track of
@@ -57,6 +59,10 @@ codeatlas query order_total
 
 # 4. 查看符号演变链（自动跟进重命名，最多 5 层）
 codeatlas history order_total
+
+# 5. 把一个符号加载进上下文工作集（虚拟内存）
+codeatlas context load order_total
+codeatlas context status
 
 # 全中文输出
 codeatlas scan . --lang zh
@@ -120,7 +126,10 @@ English version:
 - **摘要为规则生成**：取 docstring 首行，或用双语模板补位；MVP 不含 LLM。
 - **导入边是启发式**：按文件名解析；动态导入、别名、再导出可能遗漏。
 - **重命名检测是启发式**：同文件内"增删对 + 去名签名形状一致"才判定。
-- **暂无函数级调用图**（Phase 1.5 计划）；依赖图为文件级。
+- **调用图为近似解析**：函数级调用边按启发式解析；装饰器调用、动态分派、
+  高阶回调可能缺失或归因近似；依赖图为文件级。
+- **工作集并发写为最后写入胜出**：两个终端并发写上下文工作集不加密锁
+  （Phase 3 MCP 服务器将加锁）。
 - **Windows 控制台（GBK）**：文件始终 UTF-8；交互式表格可能替换不可打印字符。
 - **联网**：仅首次 `uv sync` / `pip install` 需要网络；扫描与查询完全本地。
 

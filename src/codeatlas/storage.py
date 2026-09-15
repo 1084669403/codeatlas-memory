@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS pages (
     version TEXT NOT NULL,
     granularity TEXT NOT NULL,
     loaded_at TEXT NOT NULL,
-    load_count INTEGER NOT NULL DEFAULT 1
+    load_count INTEGER NOT NULL DEFAULT 1,
+    index_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS working_set (
@@ -127,11 +128,20 @@ CREATE INDEX IF NOT EXISTS idx_call_edges_src ON call_edges(src_qname);
 CREATE INDEX IF NOT EXISTS idx_call_edges_dst ON call_edges(dst_qname);
 """
 
-# EN: Incremental migration statements for databases created by schema v1.
-# ZH: 针对 schema v1 创建的库的增量迁移语句。
-_MIGRATIONS = (
-    ("body", "ALTER TABLE symbols ADD COLUMN body TEXT NOT NULL DEFAULT ''"),
-)
+# EN: Incremental migrations for databases created by earlier schemas,
+# grouped per table: {table: [(column, DDL), ...]}.
+# ZH: 针对早期 schema 创建的库的增量迁移，按表分组：{表名: [(列名, DDL), ...]}。
+_MIGRATIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "symbols": (
+        ("body", "ALTER TABLE symbols ADD COLUMN body TEXT NOT NULL DEFAULT ''"),
+    ),
+    "pages": (
+        (
+            "index_version",
+            "ALTER TABLE pages ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0",
+        ),
+    ),
+}
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -158,19 +168,23 @@ class Store:
         self._fts_enabled = self._init_fts()
 
     def _migrate(self) -> None:
-        """Apply incremental migrations (v1 -> v2 adds symbols.body).
+        """Apply incremental migrations (v1 -> v2).
 
-        EN: checked per-column so opening an old state.db upgrades in place
-        without touching any other data (plan P1-1 migration baseline).
-        ZH: 逐列检查，老 state.db 原地升级，不影响其他数据
-        （方案 P1-1 迁移基线）。
+        EN: checked per-table/per-column so opening an old state.db upgrades
+        in place without touching any other data (plan P1-1 migration
+        baseline). Existing columns are never altered.
+        ZH: 逐表逐列检查，老 state.db 原地升级，不影响其他数据
+        （方案 P1-1 迁移基线）。已有列不会被改动。
         """
-        existing = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(symbols)")
-        }
-        for column, ddl in _MIGRATIONS:
-            if column not in existing:
-                self.conn.execute(ddl)
+        for table, columns in _MIGRATIONS.items():
+            existing = {
+                row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")
+            }
+            if not existing:
+                continue  # table itself missing -> fresh schema already applied
+            for column, ddl in columns:
+                if column not in existing:
+                    self.conn.execute(ddl)
 
     # ------------------------------------------------------------------ meta
 
@@ -469,26 +483,40 @@ class Store:
 
     # ------------------------------------------------------- pages/working set
 
-    def upsert_page(self, page_id: str, file: str, version: str, granularity: str, loaded_at: str) -> None:
+    def upsert_page(
+        self,
+        page_id: str,
+        file: str,
+        version: str,
+        granularity: str,
+        loaded_at: str,
+        index_version: int = 0,
+    ) -> None:
         """Record a page load in the page table (load_count increments).
 
         EN: pages is the "ever loaded" table — stats survive eviction; only
-        working_set rows are removed by eviction.
+        working_set rows are removed by eviction. index_version snapshots the
+        index version AT LOAD TIME for the status `loaded@N vs current`
+        comparison (plan v6); a reload refreshes it (touch = fresh load).
         ZH: pages 是"曾加载过"的页表 —— 统计在淘汰后保留；淘汰只删
-        working_set 行。
+        working_set 行。index_version 记录加载时刻的索引版本，供 status
+        的 `loaded@N vs current` 对照（方案 v6）；重载即刷新（touch =
+        重新加载）。
         """
         self.conn.execute(
-            "INSERT INTO pages(page_id, file, version, granularity, loaded_at, load_count) "
-            "VALUES (?, ?, ?, ?, ?, 1) "
+            "INSERT INTO pages(page_id, file, version, granularity, loaded_at, load_count, index_version) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?) "
             "ON CONFLICT(page_id) DO UPDATE SET version = excluded.version, "
-            "loaded_at = excluded.loaded_at, load_count = load_count + 1",
-            (page_id, file, version, granularity, loaded_at),
+            "loaded_at = excluded.loaded_at, load_count = load_count + 1, "
+            "index_version = excluded.index_version",
+            (page_id, file, version, granularity, loaded_at, index_version),
         )
         self.conn.commit()
 
     def get_page(self, page_id: str) -> tuple | None:
         row = self.conn.execute(
-            "SELECT page_id, file, version, granularity, loaded_at, load_count FROM pages WHERE page_id = ?",
+            "SELECT page_id, file, version, granularity, loaded_at, load_count, index_version "
+            "FROM pages WHERE page_id = ?",
             (page_id,),
         ).fetchone()
         return row
@@ -503,7 +531,7 @@ class Store:
     def all_pages(self) -> list[tuple]:
         return list(
             self.conn.execute(
-                "SELECT page_id, file, version, granularity, loaded_at, load_count FROM pages"
+                "SELECT page_id, file, version, granularity, loaded_at, load_count, index_version FROM pages"
             )
         )
 

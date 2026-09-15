@@ -341,11 +341,13 @@ def context_load(
         raise typer.Exit(2)
     root, store = _require_index(path)
     try:
-        if anchor is not None:
-            store.set_meta("last_anchor", f"{_anchor_file(store, symbol)}:{anchor}")
         try:
+            # EN: anchor is written inside load_page AFTER the page resolves —
+            # ambiguity/not-found never pollute meta['last_anchor'] (plan v6).
+            # ZH: 锚点在 load_page 内部、页面解析成功后才写入 —— 歧义/未找到
+            # 不会污染 meta['last_anchor']（方案 v6）。
             page = load_page(
-                store, symbol, granularity, anchor_line=None, pin=pin, origin="load", with_source=source,
+                store, symbol, granularity, anchor_line=anchor, pin=pin, origin="load", with_source=source,
             )
         except AmbiguousSymbol as amb:
             if json_output:
@@ -408,17 +410,6 @@ def context_load(
         store.close()
 
 
-def _anchor_file(store: Store, symbol: str) -> str:
-    """Best-effort file for the anchor meta when --anchor is given."""
-    row = store.symbol_row(symbol)
-    if row is None:
-        matches = store.symbols_by_name(symbol)
-        if len(matches) == 1:
-            return matches[0][0]
-        return symbol
-    return row[0]
-
-
 @context_app.command("status")
 def context_status(
     path: Path = typer.Argument(Path("."), help="Project root."),
@@ -433,6 +424,7 @@ def context_status(
         table.add_column("Gran", no_wrap=True)
         table.add_column("Tokens", justify="right")
         table.add_column("Last access", no_wrap=True)
+        table.add_column("Ver", no_wrap=True)
         table.add_column("State", no_wrap=True)
         table.add_column("Flags", no_wrap=True)
         from rich.text import Text
@@ -447,15 +439,19 @@ def context_status(
                 flags.append("prefetch")
             state_color = {"fresh": "green", "stale": "yellow", "gone": "red"}.get(r.state, "white")
             last = r.last_access_at[:19].replace("T", " ")
-            version_note = ""
-            page_row = store.get_page(r.page_id)
-            if page_row is not None:
-                version_note = f" @idx{store.index_version()}"
+            # EN: loaded@N vs current comparison (plan v6); "-" when the page
+            # row is gone.
+            # ZH: loaded@N vs current 对照（方案 v6）；gone 页显示 "-"。
+            if r.loaded_index_version:
+                ver_note = f"{r.loaded_index_version}/{r.current_index_version}"
+            else:
+                ver_note = "-"
             table.add_row(
                 Text(r.page_id),
                 r.granularity,
                 Text(str(r.tokens)),
-                Text(last + version_note),
+                Text(last),
+                Text(ver_note),
                 Text(r.state, style=state_color),
                 Text(",".join(flags) if flags else "-"),
             )

@@ -186,3 +186,43 @@ def test_doctor_passes_on_healthy_project(tmp_path: Path) -> None:
     r = runner.invoke(app, ["doctor", str(project)])
     assert r.exit_code == 0, r.output
     assert "passed" in r.output
+
+
+def test_anchor_written_inside_load_page(tmp_path: Path) -> None:
+    """--anchor updates meta['last_anchor'] only after the page resolves."""
+    project = _make_project(tmp_path)
+    _scan(project)
+    r = runner.invoke(
+        app, ["context", "load", "src.svc.TaskService.create", str(project), "--anchor", "5"]
+    )
+    assert r.exit_code == 0, r.output
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        anchor = store.get_meta("last_anchor")
+    finally:
+        store.close()
+    assert anchor is not None
+    assert anchor.endswith(":5")
+    assert "src/svc.py" in anchor  # resolved file, not the raw symbol string
+
+
+def test_anchor_not_written_on_ambiguity(tmp_path: Path) -> None:
+    """A failed (ambiguous) load must not pollute the anchor meta (plan v6)."""
+    project = _make_project(tmp_path)
+    (project / "src" / "a.py").write_text("def dup(): pass", encoding="utf-8")
+    (project / "src" / "b.py").write_text("def dup(): pass", encoding="utf-8")
+    _scan(project)
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        store.set_meta("last_anchor", "sentinel:9")
+    finally:
+        store.close()
+
+    r = runner.invoke(app, ["context", "load", "dup", str(project), "--anchor", "5"])
+    assert r.exit_code == 2  # ambiguous
+
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        assert store.get_meta("last_anchor") == "sentinel:9"  # untouched
+    finally:
+        store.close()

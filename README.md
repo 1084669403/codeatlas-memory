@@ -20,9 +20,12 @@ CodeAtlas gives your AI a **persistent, incrementally-updated memory** of the
 project:
 
 - a layered Markdown index (`CODEATLAS.md` overview + per-module detail shards),
-- Mermaid diagrams (directory tree, module dependencies, class inheritance),
+- Mermaid diagrams (directory tree, module dependencies, class inheritance,
+  call graph),
 - a symbol-level change history (old → new, per update, with rollback context),
-- keyword search over symbols (Chinese and English).
+- keyword search over symbols (Chinese and English),
+- an LLM context **virtual memory**: `context load` pages a symbol or file
+  into a token-budgeted working set with LRU eviction and neighbour prefetch.
 
 AI 编程工具（Codex、Cursor 等）的上下文窗口有限。面对大型代码库，它们每次
 任务都要重读文件、浪费 token，还会忘记上次会话改过什么。
@@ -30,9 +33,11 @@ AI 编程工具（Codex、Cursor 等）的上下文窗口有限。面对大型�
 CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
 
 - 分层 Markdown 索引（`CODEATLAS.md` 总览 + 按模块拆分的明细）；
-- Mermaid 图（目录树、模块依赖、类继承）；
+- Mermaid 图（目录树、模块依赖、类继承、调用图）；
 - 符号级变更历史（old → new，按次记录，可支撑回滚）；
-- 符号关键字搜索（中英文均可）。
+- 符号关键字搜索（中英文均可）；
+- LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
+  预算的工作集，支持 LRU 置换与邻居预取。
 
 ## Install / 安装
 
@@ -64,6 +69,11 @@ codeatlas query order_total
 # 4. A symbol's evolution chain (renames followed automatically)
 #    查看符号演变链（自动跟进重命名）
 codeatlas history order_total
+
+# 5. Load one symbol into the context working set (virtual memory)
+#    把一个符号加载进上下文工作集（虚拟内存）
+codeatlas context load order_total
+codeatlas context status
 
 # Chinese output everywhere / 全中文输出
 codeatlas scan . --lang zh
@@ -114,8 +124,15 @@ Put this in your `AGENTS.md` / `.cursorrules`:
   动态导入、别名等可能遗漏。
 - **Rename detection is heuristic**: same-file add+remove with identical
   signature shape. 重命名检测是启发式（同文件增删对、签名形状一致）。
-- **Call graph is not built yet** (planned Phase 1.5); dependency diagrams are
-  file-level. 尚未构建函数级调用图（Phase 1.5 计划）；依赖图为文件级。
+- **Call graph is approximate**: function-level call edges are resolved
+  heuristically; decorator calls, dynamic dispatch and higher-order callbacks
+  may be missing or mis-attributed. Dependency diagrams are file-level.
+  函数级调用图为近似解析：装饰器调用、动态分派、高阶回调可能缺失或归因
+  近似；依赖图为文件级。
+- **Working-set writes are last-write-wins**: two terminals writing the
+  context working set concurrently do not lock (locking arrives with the
+  Phase 3 MCP server). 两个终端并发写上下文工作集不加密锁（最后写入胜出，
+  Phase 3 MCP 服务器将加锁）。
 - **Windows console (GBK)**: files are always UTF-8; interactive table output
   may replace unprintable chars. Windows 控制台（GBK）：文件始终 UTF-8，
   交互式表格输出可能替换不可打印字符。

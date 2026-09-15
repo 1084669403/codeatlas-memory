@@ -320,3 +320,29 @@ def test_recency_decay() -> None:
         last_access_at="2026-09-14T08:00:00+00:00",
     )
     assert 0.0 < recency_of(entry) <= 1.0
+
+
+def test_status_version_comparison_loaded_vs_current(tmp_path: Path) -> None:
+    """status shows loaded@N vs current index version (plan v6)."""
+    _svc_project(tmp_path)
+    store = _scan(tmp_path)  # scan bumps index_version to 1
+    load_page(store, "svc.helper")
+    assert store.index_version() == 1
+    assert store.get_page("svc.helper")[6] == 1  # loaded@index_version
+
+    # an update bumps the version; the page was loaded at 1
+    time.sleep(0.02)
+    (tmp_path / "svc.py").write_text(
+        (tmp_path / "svc.py").read_text(encoding="utf-8").replace("return x", "return x + 1"),
+        encoding="utf-8",
+    )
+    _touch(tmp_path / "svc.py")
+    run_update(tmp_path, store)
+    assert store.index_version() == 2
+
+    rows = {r.page_id: r for r in status(store)}
+    entry = rows["svc.helper"]
+    assert entry.loaded_index_version == 1
+    assert entry.current_index_version == 2
+    assert entry.state == "stale"  # file hash mismatch, consistent with versions
+    store.close()

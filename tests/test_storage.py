@@ -69,3 +69,39 @@ def test_wal_mode(tmp_path: Path) -> None:
     mode = store.conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
     store.close()
+
+
+def test_v1_database_migrates_in_place(tmp_path: Path) -> None:
+    """A schema-v1 db (no body, no index_version column) upgrades in place."""
+    import sqlite3
+
+    p = tmp_path / "old.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        """
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE files (path TEXT PRIMARY KEY, language TEXT NOT NULL,
+            hash TEXT NOT NULL, mtime REAL NOT NULL, size INTEGER NOT NULL,
+            role TEXT NOT NULL, parsed_at TEXT NOT NULL);
+        CREATE TABLE symbols (file TEXT NOT NULL, qualified_name TEXT NOT NULL,
+            name TEXT NOT NULL, kind TEXT NOT NULL, signature TEXT NOT NULL,
+            params TEXT NOT NULL, returns TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '', role TEXT NOT NULL,
+            line INTEGER NOT NULL, end_line INTEGER NOT NULL,
+            language TEXT NOT NULL, bases TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (file, qualified_name));
+        CREATE TABLE pages (page_id TEXT PRIMARY KEY, file TEXT NOT NULL,
+            version TEXT NOT NULL, granularity TEXT NOT NULL,
+            loaded_at TEXT NOT NULL, load_count INTEGER NOT NULL DEFAULT 1);
+        """
+    )
+    conn.execute("INSERT INTO meta VALUES ('lang','en')")
+    conn.commit()
+    conn.close()
+
+    store = Store(p)
+    sym_cols = {r[1] for r in store.conn.execute("PRAGMA table_info(symbols)")}
+    page_cols = {r[1] for r in store.conn.execute("PRAGMA table_info(pages)")}
+    assert "body" in sym_cols
+    assert "index_version" in page_cols
+    store.close()

@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-14 16:20
+generated: 2026-09-15 08:27
 language: en
 files: 46
-symbols: 326
-last_scan: 2026-09-14T08:20:35+00:00
+symbols: 329
+last_scan: 2026-09-15T00:27:05+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -312,7 +312,7 @@ flowchart TD
 | `src/codeatlas/budget.py` | python | module | 5 | 0 |
 | `src/codeatlas/callgraph.py` | python | module | 8 | 0 |
 | `src/codeatlas/changelog.py` | python | module | 5 | 0 |
-| `src/codeatlas/cli.py` | python | entry | 7 | 0 |
+| `src/codeatlas/cli.py` | python | entry | 6 | 0 |
 | `src/codeatlas/consistency.py` | python | module | 7 | 0 |
 | `src/codeatlas/diagrams.py` | python | module | 7 | 0 |
 | `src/codeatlas/indexer.py` | python | module | 12 | 0 |
@@ -329,19 +329,20 @@ flowchart TD
 | `tests/test_callgraph.py` | python | test | 9 | 0 |
 | `tests/test_changelog.py` | python | test | 11 | 0 |
 | `tests/test_consistency_e2e.py` | python | test | 7 | 0 |
-| `tests/test_context_e2e.py` | python | test | 11 | 0 |
+| `tests/test_context_e2e.py` | python | test | 13 | 0 |
 | `tests/test_diagrams.py` | python | test | 10 | 0 |
 | `tests/test_indexer.py` | python | test | 9 | 0 |
 | `tests/test_markdown.py` | python | test | 6 | 0 |
-| `tests/test_memory.py` | python | test | 21 | 0 |
+| `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
 | `tests/test_scanner.py` | python | test | 5 | 0 |
-| `tests/test_storage.py` | python | test | 5 | 0 |
+| `tests/test_storage.py` | python | test | 6 | 0 |
 | `tests/test_summarizer.py` | python | test | 6 | 0 |
 
 ## Recent Changes
 
+- [2026-09-14_1620.md](.codeatlas/history/2026-09-14_1620.md)
 - [2026-09-14_1355.md](.codeatlas/history/2026-09-14_1355.md)
 - [2026-09-14_1352.md](.codeatlas/history/2026-09-14_1352.md)

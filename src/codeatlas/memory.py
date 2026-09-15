@@ -108,7 +108,12 @@ def load_page(
         store.set_meta("last_anchor", f"{page.file}:{anchor_line}")
 
     now = _now_iso()
-    store.upsert_page(page.page_id, page.file, page.version, page.granularity, now)
+    # EN: snapshot the index version at load time for the status comparison.
+    # ZH: 记录加载时刻的索引版本，供 status 对照。
+    store.upsert_page(
+        page.page_id, page.file, page.version, page.granularity, now,
+        index_version=store.index_version(),
+    )
 
     entry = store.get_working_set_entry(page.page_id)
     tokens = page_cost(page)
@@ -488,6 +493,12 @@ class PageStatus:
     pinned: bool
     origin: str
     state: str  # fresh | stale | gone
+    # EN: loaded@N vs current index version comparison (plan v6); 0 when the
+    # page row is missing (gone).
+    # ZH: loaded@N vs current 索引版本对照（方案 v6）；页面行缺失（gone）
+    # 时为 0。
+    loaded_index_version: int = 0
+    current_index_version: int = 0
 
 
 def status(store: Store) -> list[PageStatus]:
@@ -525,6 +536,8 @@ def status(store: Store) -> list[PageStatus]:
                 pinned=entry.pinned,
                 origin=entry.origin,
                 state=state,
+                loaded_index_version=page_row[6] if page_row else 0,
+                current_index_version=store.index_version(),
             )
         )
     return out
@@ -543,7 +556,7 @@ def invalidate_stale(store: Store) -> int:
     消失的页为 'gone'，保留旧值供对照。返回 stale 页数。
     """
     stale = 0
-    for page_id, file, version, _gran, _loaded, _cnt in store.all_pages():
+    for page_id, file, version, _gran, _loaded, _cnt, _iv in store.all_pages():
         current = store.get_file_hash(file)
         if current is None:
             continue  # gone — kept for status comparison
