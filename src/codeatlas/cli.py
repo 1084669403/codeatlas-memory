@@ -6,12 +6,14 @@ Commands:
     update  incremental update -> only changed files re-parsed + history doc
     query   full-text symbol search (FTS5 trigram, LIKE fallback)
     history symbol evolution chain from the append-only changes table
-    serve   (placeholder, Phase 3)
-    mcp     (placeholder, Phase 3)
+    context LLM context virtual memory (load/status/evict/budget/ws)
+    doctor  consistency invariants
+    mcp     MCP server (stdio) for AI agent integration
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
@@ -19,23 +21,19 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .callgraph import rebuild_call_edges
-from .changelog import write_codeatlas_gitignore, write_history_doc
-from .consistency import run_all_checks
-from .indexer import run_scan, run_update
-from .markdown import render_detail_files, render_overview
-from .memory import (
-    AmbiguousSymbol,
-    PageStatus,
-    ensure_budget,
-    load_budget,
-    load_page,
-    render_page_with_store,
-    render_working_set,
-    save_budget,
-    status as ws_status,
+from . import service
+from .memory import AmbiguousSymbol, load_budget, save_budget
+from .plans import (
+    PlanError,
+    find_plan,
+    lint_plans,
+    plan_status,
+    plan_view,
 )
-from .prefetch import prefetch as do_prefetch
+from .plan_workflow import approve_plan, create_plan, diff_plan, reapprove_plan, revise_plan
+from .plan_workflow import complete_batch, find_gate_definition, mark_batch_stale, record_gate_result, start_batch
+from .gates import run_gate
+from .plan_memory import detect_stale_evidence
 from .storage import Store
 
 app = typer.Typer(
@@ -52,21 +50,36 @@ TokensOpt = typer.Option(None, "--max-tokens", "-t", help="Token budget for the 
 
 
 def _open_store(root: Path) -> Store:
-    """Open (creating if needed) the .codeatlas/state.db for a project root."""
-    codeatlas_dir = root / ".codeatlas"
-    codeatlas_dir.mkdir(parents=True, exist_ok=True)
-    return Store(codeatlas_dir / "state.db")
+    # EN: thin wrapper over the shared service layer (kept for tests/callers).
+    # ZH: 共享服务层的薄封装（保留给测试与调用方）。
+    return service.open_store(root)
 
 
 def _lang_switch_notice(result, lang: str) -> None:
-    # EN: run_update signals a language switch via the files_skipped sentinel.
-    # ZH: run_update 通过 files_skipped 哨兵值通知语言切换。
-    if result.files_skipped == -1:
+    # EN: service.update_project zeroes the sentinel; outcome.language_switched
+    # is the preferred signal. Kept for direct ScanResult callers.
+    # ZH: service.update_project 已将哨兵归零；优先用 outcome.language_switched。
+    # 保留给直接使用 ScanResult 的调用方。
+    if getattr(result, "files_skipped", 0) == -1:
         result.files_skipped = 0
         if lang == "zh":
             console.print("[yellow]输出语言已变更，已自动全量重扫以保持描述一致。[/yellow]")
         else:
             console.print("[yellow]Output language changed — full re-scan performed for consistency.[/yellow]")
+
+
+def _print_json(payload: object) -> None:
+    """Print deterministic plain JSON; stdout remains safe for piping."""
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
+def _plans_dir(root: Path, plans_dir: Path) -> Path:
+    """Resolve the plan directory and prevent paths outside the project root."""
+    directory = plans_dir if plans_dir.is_absolute() else root / plans_dir
+    resolved = directory.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise PlanError("PLAN_OUTSIDE_ROOT", f"Plans directory is outside project root: {plans_dir}", path=directory.as_posix())
+    return resolved
 
 
 @app.command()
@@ -85,18 +98,10 @@ def scan(
         raise typer.Exit(2)
 
     with console.status(f"[bold green]Scanning {root} ..."):
-        store = _open_store(root)
         try:
-            result = run_scan(root, store, output_lang=lang)
-            codeatlas_dir = root / ".codeatlas"
-            render_detail_files(store, codeatlas_dir / "detail", lang)
-            render_overview(
-                root, store, result, root / "CODEATLAS.md",
-                lang=lang, max_tokens=max_tokens,
-            )
-            write_codeatlas_gitignore(codeatlas_dir)
+            result = service.scan_project(root, lang, max_tokens)
         finally:
-            store.close()
+            pass
 
     console.print(
         f"[green]Scanned[/green] {result.files_scanned} file(s), "
@@ -128,22 +133,14 @@ def update(
         scan(path=path, lang=lang, max_tokens=max_tokens)
         return
 
-    store = _open_store(root)
-    try:
-        result = run_update(root, store, output_lang=lang)
-        _lang_switch_notice(result, lang)
-        codeatlas_dir = root / ".codeatlas"
-        render_detail_files(store, codeatlas_dir / "detail", lang)
-        render_overview(
-            root, store, result, root / "CODEATLAS.md",
-            lang=lang, max_tokens=max_tokens,
-        )
-        history_path = write_history_doc(
-            codeatlas_dir / "history", store, result.changes, result.timestamp,
-            lang=lang, files_parsed=result.files_parsed, files_scanned=result.files_scanned,
-        )
-    finally:
-        store.close()
+    outcome = service.update_project(root, lang, max_tokens)
+    result = outcome.result
+    if outcome.language_switched:
+        if lang == "zh":
+            console.print("[yellow]输出语言已变更，已自动全量重扫以保持描述一致。[/yellow]")
+        else:
+            console.print("[yellow]Output language changed — full re-scan performed for consistency.[/yellow]")
+    history_path = outcome.history_path
 
     console.print(
         f"[green]Updated[/green] {result.files_parsed} file(s) re-parsed, "
@@ -160,19 +157,13 @@ def query(
 ) -> None:
     """Search symbols (FTS5 trigram when available; LIKE fallback otherwise)."""
     root = path.resolve()
-    db = root / ".codeatlas" / "state.db"
-    if not db.is_file():
+    try:
+        rows = service.search_symbols(root, text, limit)
+    except FileNotFoundError:
         err_console.print(
-            "[red]No index found. Run `codeatlas scan .` first. "
-            "/ 未找到索引，请先运行 `codeatlas scan .`[/red]"
+            f"[red]{service.NO_INDEX_MSG}[/red]"
         )
         raise typer.Exit(2)
-
-    store = Store(db)
-    try:
-        rows = _search(store, text, limit)
-    finally:
-        store.close()
 
     if not rows:
         console.print(f"[yellow]No matches for '{text}'.[/yellow]")
@@ -191,22 +182,20 @@ def query(
 
     for r in rows:
         table.add_row(
-            Text(f"{r[0]}:{r[1]}"),
-            Text(r[2]),
-            Text(r[3]),
-            Text(r[4]),
+            Text(f"{r['file']}:{r['line']}"),
+            Text(r["qualified_name"]),
+            Text(r["signature"]),
+            Text(r["description"]),
         )
     console.print(table)
 
 
 def _search(store: Store, text: str, limit: int) -> list[tuple]:
-    """FTS5 + bm25 ranking; <3-char queries and missing FTS fall back to LIKE.
+    """Deprecated: use service.search_symbols (kept for direct callers)."""
+    from .service import _search_row
 
-    EN: LIKE fallback keeps a sensible priority order: exact name > prefix >
-    description > path. trigram needs >=3 chars, shorter queries must use LIKE.
-    ZH: LIKE 回退保持合理优先级：名称精确 > 前缀 > 描述 > 路径。
-    trigram 需要 >=3 字符，更短的查询必须走 LIKE。
-    """
+    # EN: this helper historically took an open Store; recreate the tuples.
+    # ZH: 该辅助函数历史上接收已打开的 Store；此处重建元组返回。
     if store.fts_enabled and len(text) >= 3:
         sql = (
             "SELECT s.file, s.line, s.qualified_name, s.signature, s.description "
@@ -216,7 +205,7 @@ def _search(store: Store, text: str, limit: int) -> list[tuple]:
         try:
             return list(store.conn.execute(sql, (text, limit)))
         except Exception:
-            pass  # fall through to LIKE on query syntax errors
+            pass
     like = f"%{text}%"
     sql = (
         "SELECT file, line, qualified_name, signature, description FROM ("
@@ -242,64 +231,28 @@ def history(
 ) -> None:
     """Show a symbol's evolution chain (renames are followed automatically)."""
     root = path.resolve()
-    db = root / ".codeatlas" / "state.db"
-    if not db.is_file():
-        err_console.print(
-            "[red]No index found. Run `codeatlas scan .` first. "
-            "/ 未找到索引，请先运行 `codeatlas scan .`[/red]"
-        )
-        raise typer.Exit(2)
-
-    store = Store(db)
     try:
-        _print_history(store, symbol, max_depth)
-    finally:
-        store.close()
+        text = service.format_history(root, symbol, max_depth)
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(2)
+    if text.startswith("No history for"):
+        console.print(f"[yellow]{text}[/yellow]")
+        return
+    # EN: render as plain print per line for styling parity with before.
+    # ZH: 逐行纯输出，与原有样式保持一致。
+    for line in text.splitlines():
+        if line.startswith("## "):
+            console.rule(f"[bold]{line[3:]}")
+        elif line.strip() and not line.startswith(("  ", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0")):
+            console.print(f"[dim]{line}[/dim]")
+        else:
+            console.print(line)
 
 
 def _print_history(store: Store, symbol: str, max_depth: int) -> None:
-    """Resolve bare vs qualified names, follow rename chains, print the chain.
-
-    EN: A bare name may match several qualified symbols — list them all.
-    RENAMED records link old qname -> new qname; we follow up to max_depth
-    hops to keep the chain connected across renames.
-    ZH: 裸名可能匹配多个限定名 —— 全部列出。RENAMED 记录提供
-    旧名 -> 新名的链接，最多跟进 max_depth 跳保证跨重命名连续。
-    """
-    names: list[str]
-    if "." in symbol:
-        names = [symbol]
-    else:
-        counts = store.changes_by_symbol_name(symbol)
-        if not counts:
-            console.print(f"[yellow]No history for '{symbol}'.[/yellow]")
-            return
-        names = sorted(counts)
-        if len(names) > 1:
-            console.print(f"[dim]{len(names)} qualified symbols match '{symbol}':[/dim]")
-
-    seen: set[str] = set()
-    for name in names:
-        console.rule(f"[bold]{name}")
-        depth = 0
-        current = name
-        while current and current not in seen and depth <= max_depth:
-            seen.add(current)
-            records = store.changes_for_symbol(current)
-            if not records:
-                break
-            for rec in records:
-                detail = f" [dim]{rec.detail}[/dim]" if rec.detail else ""
-                console.print(
-                    f"  [cyan]{rec.ts}[/cyan] [bold]{rec.change_type.value}[/bold] "
-                    f"old={rec.old_value!r} new={rec.new_value!r}{detail}"
-                )
-            # follow rename chain both directions
-            renamed_to = next(
-                (r.new_value for r in records if r.change_type.value == "renamed"), None
-            )
-            current = renamed_to
-            depth += 1
+    """Deprecated: use service.format_history (kept for direct callers)."""
+    console.print(service.format_history_from_store(store, symbol, max_depth))
 
 
 # ==========================================================================
@@ -311,15 +264,378 @@ context_app = typer.Typer(help="LLM context virtual memory: load/status/evict/bu
 app.add_typer(context_app, name="context")
 
 
+# ==========================================================================
+# EN: plan command group — Markdown plan artifact surface.
+# ZH: plan 命令组 —— Markdown 计划工件入口。
+# ==========================================================================
+
+plan_app = typer.Typer(help="Create, inspect, and lint Markdown plan artifacts.", no_args_is_help=True)
+app.add_typer(plan_app, name="plan")
+
+
+@plan_app.command("context")
+def plan_context(
+    query: str = typer.Argument(..., help="Natural-language task description."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    limit: int = typer.Option(8, "--limit", min=1, max=32, help="Maximum evidence items."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Kept for command-family consistency; retrieval does not read plan bodies."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Retrieve bounded, evidence-backed context for planning."""
+    del plans_dir
+    root = path.resolve()
+    try:
+        payload = service.plan_context(root, query, limit=limit)
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _print_json(payload)
+        return
+    if payload.get("status") == "bootstrap_required":
+        console.print(f"[yellow]{payload['hint']}[/yellow]")
+        return
+    console.print(f"[bold]{payload['query']}[/bold]")
+    console.print(payload["summary"])
+    table = Table(title="Evidence")
+    table.add_column("ID", no_wrap=True)
+    table.add_column("Kind", no_wrap=True)
+    table.add_column("Ref", overflow="fold")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Stale", justify="right")
+    for item in payload["evidence"]:
+        table.add_row(
+            item["evidence_id"], item["kind"], item["ref"], item["source_path"],
+            f"{item['confidence']:.2f}", "yes" if item["stale"] else "no",
+        )
+    console.print(table)
+    if payload["truncated"]:
+        err_console.print("[yellow]Additional ranked evidence was omitted by the retrieval cap.[/yellow]")
+
+
+@plan_app.command("new")
+def plan_new(
+    slug: str = typer.Argument(..., help="Short plan slug, e.g. auth-refactor."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    title: str | None = typer.Option(None, "--title", help="Human-readable plan title."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON instead of text."),
+) -> None:
+    """Create a new valid plan skeleton without overwriting existing files."""
+    root = path.resolve()
+    if not root.is_dir():
+        err_console.print(f"[red]Not a directory: {root}[/red]")
+        raise typer.Exit(2)
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = create_plan(root, directory, slug=slug, title=title)
+        plan = result.plan
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    payload = {
+        "id": plan.id,
+        "path": plan.source_path,
+        "revision": plan.frontmatter["revision"],
+        "content_hash": plan.frontmatter["content_hash"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Created plan[/green] {plan.id} -> {payload['path']}")
+
+
+@plan_app.command("show")
+def plan_show(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    view: str = typer.Option("summary", "--view", help="Bounded view: summary, execution, engineering, evidence, graph, or full."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON instead of text."),
+) -> None:
+    """Show a bounded plan summary or structured full view."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        plan = find_plan(plan_id, directory, root=root)
+        payload = plan_view(plan, view=view)
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(exc.code in {"PLAN_NOT_FOUND", "PLAN_DUPLICATE_ID"} and 1 or 1)
+
+    if json_output:
+        _print_json(payload)
+    elif view == "summary":
+        console.print(f"[bold]{payload['id']}[/bold] ({payload['status']}, rev {payload['revision']})")
+        console.print(f"profile: {payload['engineering_profile']}  next: {payload['next_batch']}")
+        for warning in payload["warnings"]:
+            err_console.print(f"[yellow]{warning['code']}: {warning['message']}[/yellow]")
+    elif view != "full":
+        _print_json(payload)
+    else:
+        console.print(plan.body)
+
+
+@plan_app.command("stale")
+def plan_stale(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Detect stale gate evidence without rewriting plans."""
+    root = path.resolve()
+    try:
+        payload = detect_stale_evidence(root, _plans_dir(root, plans_dir))
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _print_json(payload)
+        return
+    if not payload["items"]:
+        console.print("[green]No stale plan evidence detected.[/green]")
+    for item in payload["items"]:
+        console.print(f"[yellow]{item['plan_id']} · {item['batch']} · {item['gate_id']}[/yellow]")
+
+
+@plan_app.command("approve")
+def plan_approve(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    approved_by: str = typer.Option(..., "--approved-by", help="The human approver recorded in the audit event."),
+    basis: str = typer.Option("conversation", "--basis", help="conversation, review-doc, issue, or ci-review."),
+    notes: str | None = typer.Option(None, "--notes", help="Optional durable approval notes."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject approval if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Record a human approval decision with a revision snapshot."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = approve_plan(
+            root,
+            directory,
+            plan_id,
+            approved_by=approved_by,
+            basis=basis,
+            notes=notes,
+            expected_revision=expected_revision,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    plan = result.plan
+    payload = {
+        "id": plan.id,
+        "status": plan.status,
+        "revision": plan.frontmatter["revision"],
+        "reapproval_required": plan.frontmatter["reapproval_required"],
+        "content_hash": plan.frontmatter["content_hash"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Approved plan[/green] {plan.id} at revision {payload['revision']}")
+
+
+@plan_app.command("revise")
+def plan_revise(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject revision if the revision changed."),
+    allow_stale: bool = typer.Option(False, "--allow-stale", help="Accept externally edited Markdown and refresh the hash."),
+    bootstrap: bool = typer.Option(False, "--bootstrap", help="Create a revision 1 baseline for a pre-workflow plan."),
+    reason: str | None = typer.Option(None, "--reason", help="Optional durable revision reason."),
+    writer: str = typer.Option("codex", "--writer", help="The actor recorded in the audit event."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Record the current Markdown file as the next durable revision."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = revise_plan(
+            root,
+            directory,
+            plan_id,
+        expected_revision=expected_revision,
+        allow_stale=allow_stale,
+        bootstrap=bootstrap,
+        reason=reason,
+            writer=writer,
+        )
+
+
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    plan = result.plan
+    payload = {
+        "id": plan.id,
+        "status": plan.status,
+        "revision": plan.frontmatter["revision"],
+        "revision_type": plan.frontmatter["revision_type"],
+        "reapproval_required": plan.frontmatter["reapproval_required"],
+        "content_hash": plan.frontmatter["content_hash"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(
+            f"[green]Revised plan[/green] {plan.id} at revision {payload['revision']} "
+            f"({payload['revision_type']})"
+        )
+
+
+@plan_app.command("reapprove")
+def plan_reapprove(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    approved_by: str = typer.Option(..., "--approved-by", help="The human approver recorded in the audit event."),
+    basis: str = typer.Option("conversation", "--basis", help="conversation, review-doc, issue, or ci-review."),
+    notes: str | None = typer.Option(None, "--notes", help="Optional durable reapproval notes."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject reapproval if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Record human reapproval after a semantic revision to an approved plan."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = reapprove_plan(
+            root,
+            directory,
+            plan_id,
+            approved_by=approved_by,
+            basis=basis,
+            notes=notes,
+            expected_revision=expected_revision,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    plan = result.plan
+    payload = {
+        "id": plan.id,
+        "status": plan.status,
+        "revision": plan.frontmatter["revision"],
+        "reapproval_required": plan.frontmatter["reapproval_required"],
+        "content_hash": plan.frontmatter["content_hash"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Reapproved plan[/green] {plan.id} at revision {payload['revision']}")
+
+
+@plan_app.command("diff")
+def plan_diff(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    from_revision: int = typer.Option(..., "--from-revision", help="The older snapshot revision."),
+    to_revision: int = typer.Option(..., "--to-revision", help="The newer snapshot revision."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Classify the change between two durable revision snapshots."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        payload = diff_plan(
+            root,
+            directory,
+            plan_id,
+            from_revision=from_revision,
+            to_revision=to_revision,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"{payload['revision_type']} change: {from_revision} -> {to_revision}")
+
+
+@plan_app.command("status")
+def plan_status_command(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON instead of text."),
+) -> None:
+    """Group plans by status without dumping plan bodies."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        payload = plan_status(directory, root=root)
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _print_json(payload)
+        return
+    table = Table(title="plan status")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Plans", justify="right")
+    table.add_column("IDs", overflow="fold")
+    for group in payload["groups"]:
+        ids = ", ".join(plan["id"] for plan in group["plans"])
+        table.add_row(group["status"], str(len(group["plans"])), ids)
+    console.print(table)
+    for warning in payload["warnings"]:
+        err_console.print(f"[yellow]{warning['code']}: {warning['message']}[/yellow]")
+
+
+@plan_app.command("lint")
+def plan_lint(
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON instead of text."),
+) -> None:
+    """Lint all Markdown plans and return structured stable diagnostics."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        issues = lint_plans(directory, root=root)
+    except PlanError as exc:
+        issues = [type("LintIssue", (), {"code": exc.code, "message": exc.message, "field": exc.field, "path": exc.path})()]
+
+    payload = {
+        "ok": not issues,
+        "issues": [
+            {"code": issue.code, "message": issue.message, "field": issue.field, "path": issue.path}
+            for issue in issues
+        ],
+    }
+    if json_output:
+        _print_json(payload)
+    elif issues:
+        for issue in issues:
+            location = f" [{issue.path}]" if issue.path else ""
+            err_console.print(f"[red]{issue.code}{location}: {issue.message}[/red]")
+    else:
+        console.print("[green]All plans passed lint.[/green]")
+    if issues:
+        raise typer.Exit(1)
+
+
 def _require_index(path: Path) -> tuple[Path, Store]:
     """Open the store or exit 1 with the standard no-index message (plan v6)."""
     root = path.resolve()
     db = root / ".codeatlas" / "state.db"
     if not db.is_file():
-        err_console.print(
-            "[red]No index found. Run `codeatlas scan .` first. "
-            "/ 未找到索引，请先运行 `codeatlas scan .`[/red]"
-        )
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
         raise typer.Exit(1)
     return root, Store(db)
 
@@ -339,15 +655,15 @@ def context_load(
     if granularity not in (None, "function", "file"):
         err_console.print("[red]--granularity must be 'function' or 'file'[/red]")
         raise typer.Exit(2)
-    root, store = _require_index(path)
+    root, _store = _require_index(path)
     try:
+        # EN: anchor is written inside load_page AFTER the page resolves —
+        # ambiguity/not-found never pollute meta['last_anchor'] (plan v6).
+        # ZH: 锚点在 load_page 内部、页面解析成功后才写入 —— 歧义/未找到
+        # 不会污染 meta['last_anchor']（方案 v6）。
         try:
-            # EN: anchor is written inside load_page AFTER the page resolves —
-            # ambiguity/not-found never pollute meta['last_anchor'] (plan v6).
-            # ZH: 锚点在 load_page 内部、页面解析成功后才写入 —— 歧义/未找到
-            # 不会污染 meta['last_anchor']（方案 v6）。
-            page = load_page(
-                store, symbol, granularity, anchor_line=anchor, pin=pin, origin="load", with_source=source,
+            outcome = service.load_context_page(
+                root, symbol, granularity, anchor=anchor, pin=pin, with_source=source,
             )
         except AmbiguousSymbol as amb:
             if json_output:
@@ -359,55 +675,50 @@ def context_load(
                 for cand in amb.candidates:
                     err_console.print(f"  - {cand}")
             raise typer.Exit(2)
-        if page is None:
-            err_console.print(f"[red]Symbol or file not found: {symbol}[/red]")
-            raise typer.Exit(1)
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
 
-        evicted, unsatisfied = ensure_budget(store)
-        if unsatisfied > 0:
-            err_console.print(
-                f"[yellow]Warning: {unsatisfied} tokens could not be freed — "
-                "consider raising the working-set budget (`context budget --working-set N`).[/yellow]"
-            )
-        for page_id in evicted:
-            err_console.print(f"[dim]evicted: {page_id}[/dim]")
+    if outcome.page is None:
+        err_console.print(f"[red]Symbol or file not found: {symbol}[/red]")
+        raise typer.Exit(1)
 
-        if not no_prefetch:
-            do_prefetch(store, page)
+    evicted, unsatisfied, tokens, page = outcome.evicted, outcome.unsatisfied, outcome.tokens, outcome.page
+    if unsatisfied > 0:
+        err_console.print(
+            f"[yellow]Warning: {unsatisfied} tokens could not be freed — "
+            "consider raising the working-set budget (`context budget --working-set N`).[/yellow]"
+        )
+    for page_id in evicted:
+        err_console.print(f"[dim]evicted: {page_id}[/dim]")
 
-        from .memory import page_cost as _page_cost
+    if json_output:
+        import json as _json
 
-        tokens = _page_cost(page)
-        if json_output:
-            import json as _json
-
-            current_hash = store.get_file_hash(page.file)
-            print(
-                _json.dumps(
-                    {
-                        "page": {
-                            "page_id": page.page_id,
-                            "granularity": page.granularity,
-                            "file": page.file,
-                            "line": page.line,
-                            "end_line": page.end_line,
-                            "signature": page.signature,
-                            "callers": page.callers,
-                            "callees": page.callees,
-                            "related_files": page.related_files,
-                        },
-                        "tokens": tokens,
-                        "stale": bool(current_hash and current_hash != page.version),
+        print(
+            _json.dumps(
+                {
+                    "page": {
+                        "page_id": page.page_id,
+                        "granularity": page.granularity,
+                        "file": page.file,
+                        "line": page.line,
+                        "end_line": page.end_line,
+                        "signature": page.signature,
+                        "callers": page.callers,
+                        "callees": page.callees,
+                        "related_files": page.related_files,
                     },
-                    ensure_ascii=False,
-                )
+                    "tokens": tokens,
+                    "stale": outcome.stale,
+                },
+                ensure_ascii=False,
             )
-        else:
-            # EN: pure print — no rich folding/ANSI; piping is lossless (v6).
-            # ZH: 纯 print —— 无 rich 折行/ANSI；管道输出无损（v6）。
-            print(render_page_with_store(store, page))
-    finally:
-        store.close()
+        )
+    else:
+        # EN: pure print — no rich folding/ANSI; piping is lossless (v6).
+        # ZH: 纯 print —— 无 rich 折行/ANSI；管道输出无损（v6）。
+        print(outcome.rendered)
 
 
 @context_app.command("status")
@@ -415,74 +726,13 @@ def context_status(
     path: Path = typer.Argument(Path("."), help="Project root."),
 ) -> None:
     """Show the working set: pages, tokens, recency, stale/gone, budget bar."""
-    _root, store = _require_index(path)
+    root, _store = _require_index(path)
     try:
-        rows: list[PageStatus] = ws_status(store)
-        b = load_budget(store)
-        table = Table(title="context status / 工作集")
-        table.add_column("Page", style="cyan", no_wrap=True)
-        table.add_column("Gran", no_wrap=True)
-        table.add_column("Tokens", justify="right")
-        table.add_column("Last access", no_wrap=True)
-        table.add_column("Ver", no_wrap=True)
-        table.add_column("State", no_wrap=True)
-        table.add_column("Flags", no_wrap=True)
-        from rich.text import Text
-
-        total_tokens = 0
-        for r in rows:
-            total_tokens += r.tokens
-            flags = []
-            if r.pinned:
-                flags.append("pinned")
-            if r.origin == "prefetch":
-                flags.append("prefetch")
-            state_color = {"fresh": "green", "stale": "yellow", "gone": "red"}.get(r.state, "white")
-            last = r.last_access_at[:19].replace("T", " ")
-            # EN: loaded@N vs current comparison (plan v6); "-" when the page
-            # row is gone.
-            # ZH: loaded@N vs current 对照（方案 v6）；gone 页显示 "-"。
-            if r.loaded_index_version:
-                ver_note = f"{r.loaded_index_version}/{r.current_index_version}"
-            else:
-                ver_note = "-"
-            table.add_row(
-                Text(r.page_id),
-                r.granularity,
-                Text(str(r.tokens)),
-                Text(last),
-                Text(ver_note),
-                Text(r.state, style=state_color),
-                Text(",".join(flags) if flags else "-"),
-            )
-        console.print(table)
-
-        # EN: budget progress bar (used/total + page headroom).
-        # ZH: 预算进度条（used/total + 页数余量）。
-        from rich.progress import Progress, BarColumn, TextColumn
-
-        pct = min(1.0, total_tokens / b.total) if b.total else 0.0
-        progress = Progress(
-            TextColumn("[bold]budget[/bold]"),
-            BarColumn(),
-            TextColumn(f"{total_tokens}/{b.total} tokens ({pct:.0%})"),
-            TextColumn(
-                f"· pages {len(rows)}/{b.max_pages}"
-                + ("" if len(rows) <= b.max_pages else " [red](over)[/red]")
-            ),
-        )
-        progress.add_task("budget", total=100, completed=pct * 100)
-        console.print(progress)
-
-        if store.evict_count() > 0:
-            ratio = store.evict_count() / b.max_pages if b.max_pages else 0
-            if ratio > 0.4:
-                console.print(
-                    f"[yellow]{store.evict_count()} page(s) evicted (>40% of max-pages) — "
-                    "consider `context budget --working-set N --max-pages M`[/yellow]"
-                )
-    finally:
-        store.close()
+        text = service.format_status(root)
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
+    console.print(text)
 
 
 @context_app.command("evict")
@@ -495,42 +745,24 @@ def context_evict(
     force: bool = typer.Option(False, "--force", help="With --all: evict pinned pages too."),
 ) -> None:
     """Evict pages from the working set (--all keeps pinned; --force evicts all)."""
-    _root, store = _require_index(path)
+    root, _store = _require_index(path)
     try:
-        if pin or unpin:
-            target = page_id
-            entry = store.get_working_set_entry(target)
-            if entry is None:
-                err_console.print(f"[red]Not in working set: {target}[/red]")
-                raise typer.Exit(1)
-            entry.pinned = pin and True or (False if unpin else entry.pinned)
-            store.upsert_working_set(entry)
-            console.print(f"[green]{'pinned' if pin else 'unpinned'}[/green] {target}")
-            return
-        if all_pages:
-            from .memory import evict as _evict
-
-            entries = store.working_set_entries()
-            if not force:
-                entries = [e for e in entries if not e.pinned]
-            total = sum(e.tokens for e in entries)
-            evicted, _unsat = _evict(store, total)
-            console.print(f"[green]Evicted[/green] {len(evicted)} page(s)")
-            return
-        if not page_id:
-            err_console.print("[red]Provide a page_id or --all[/red]")
-            raise typer.Exit(2)
-        entry = store.get_working_set_entry(page_id)
-        if entry is None:
-            err_console.print(f"[red]Not in working set: {page_id}[/red]")
-            raise typer.Exit(1)
-        if entry.pinned and not force:
-            err_console.print("[yellow]Page is pinned — use --force to evict.[/yellow]")
-            raise typer.Exit(1)
-        store.delete_working_set_entry(page_id)
-        console.print(f"[green]Evicted[/green] {page_id}")
-    finally:
-        store.close()
+        msg = service.evict_pages(
+            root, page_id, all_pages=all_pages, pin=pin, unpin=unpin, force=force,
+        )
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
+    except KeyError as e:
+        err_console.print(f"[red]{e.args[0]}[/red]")
+        raise typer.Exit(1)
+    except PermissionError as e:
+        err_console.print(f"[yellow]{e.args[0]}[/yellow]")
+        raise typer.Exit(1)
+    except ValueError as e:
+        err_console.print(f"[red]{e.args[0]}[/red]")
+        raise typer.Exit(2)
+    console.print(f"[green]{msg}[/green]")
 
 
 @context_app.command("budget")
@@ -567,8 +799,11 @@ def context_ws(
     lang: str = "en",
 ) -> None:
     """Print the merged working set (render_working_set) as markdown."""
-    _root, store = _require_index(path)
+    root, _store = _require_index(path)
+    store = Store(root / ".codeatlas" / "state.db")
     try:
+        from .memory import render_working_set
+
         print(render_working_set(store, lang))
     finally:
         store.close()
@@ -579,24 +814,22 @@ def doctor(
     path: Path = typer.Argument(Path("."), help="Project root."),
 ) -> None:
     """Run consistency invariants; exit 1 on violations."""
-    root, store = _require_index(path)
+    root, _store = _require_index(path)
     try:
-        history_dir = root / ".codeatlas" / "history"
-        problems = run_all_checks(store, root, history_dir if history_dir.is_dir() else None)
-        # EN: budget/callgraph advice (plan: 淘汰率建议 + 解析率报告).
-        # ZH: 预算/调用图建议（方案：淘汰率建议 + 解析率报告）。
-        b = load_budget(store)
-        entries = store.working_set_entries()
-        used = sum(e.tokens for e in entries)
-        if used > b.working_set:
-            problems.append(
-                f"working set {used} tokens exceeds budget {b.working_set} — run `context evict --all`"
-            )
-        rate_raw = store.get_meta("call_resolution_rate")
+        problems = service.doctor_problems(root)
+        store = Store(root / ".codeatlas" / "state.db")
+        try:
+            rate_raw = store.get_meta("call_resolution_rate")
+        finally:
+            store.close()
         if rate_raw:
             console.print(f"[dim]call resolution rate: {float(rate_raw):.0%}[/dim]")
-    finally:
-        store.close()
+    except FileNotFoundError:
+        err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
+
+    for warning in service.doctor_warnings(root):
+        err_console.print(f"[yellow]{warning}[/yellow]")
 
     if problems:
         for p in problems:
@@ -609,35 +842,240 @@ def doctor(
 def serve(
     lsp: bool = typer.Option(False, "--lsp", help="Run in LSP mode (placeholder shape)."),
 ) -> None:
-    """(Placeholder) LSP/MCP server — planned for Phase 3."""
+    """Run the MCP server (stdio); LSP mode is planned for a later phase."""
     if lsp:
         console.print(
-            "[yellow]LSP server is planned for Phase 3. / LSP 服务器计划于第三阶段实现。[/yellow]"
+            "[yellow]LSP server is planned for a later phase. / LSP 服务器计划于后续阶段实现。[/yellow]"
         )
-    else:
-        console.print(
-            "[yellow]Server mode is planned for Phase 3. / 服务器模式计划于第三阶段实现。[/yellow]"
-        )
-    console.print(
-        "[dim]Planned MCP tools: codeatlas_load_page / get_working_set / evict_page / prefetch[/dim]"
-    )
-    raise typer.Exit(0)
+        raise typer.Exit(0)
+    from .mcp_server import main as mcp_main
+
+    mcp_main()
 
 
 @app.command()
 def mcp() -> None:
-    """(Placeholder) MCP server — planned for Phase 3."""
-    console.print("[yellow]MCP server is planned for Phase 3. / MCP 服务器计划于第三阶段实现。[/yellow]")
-    console.print(
-        "[dim]Planned MCP tools: codeatlas_load_page / get_working_set / evict_page / prefetch[/dim]"
-    )
-    raise typer.Exit(0)
+    """Run the MCP server (stdio transport) for AI agent integration."""
+    from .mcp_server import main as mcp_main
+
+    mcp_main()
 
 
 @app.command()
 def version() -> None:
     """Print the CodeAtlas version."""
     console.print(f"codeatlas {__version__}")
+
+
+batch_app = typer.Typer(help="Start, complete, and invalidate validated plan batches.", no_args_is_help=True)
+gate_app = typer.Typer(help="Run and record plan quality gates.", no_args_is_help=True)
+plan_app.add_typer(batch_app, name="batch")
+plan_app.add_typer(gate_app, name="gate")
+
+
+@batch_app.command("start")
+def plan_batch_start(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID from the Batches table."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    actor: str = typer.Option("codex", "--actor", help="Actor recorded in the audit event."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject the transition if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Start one pending or blocked batch."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = start_batch(root, directory, plan_id, batch=batch, expected_revision=expected_revision, actor=actor)
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "status": result.plan.status,
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Started batch[/green] {batch} at revision {payload['revision']}")
+
+
+@batch_app.command("complete")
+def plan_batch_complete(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID from the Batches table."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    actor: str = typer.Option("codex", "--actor", help="Actor recorded in the audit event."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject the transition if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Complete a batch after required gate and test evidence pass."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = complete_batch(root, directory, plan_id, batch=batch, expected_revision=expected_revision, actor=actor)
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "status": result.plan.status,
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Completed batch[/green] {batch} at revision {payload['revision']}")
+
+
+@gate_app.command("run")
+def plan_gate_run(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID that this gate run validates."),
+    gate_id: str = typer.Argument(..., help="Configured gate ID."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    actor: str = typer.Option("trusted-runner", "--actor", help="Actor recorded for runner evidence."),
+    timeout: float = typer.Option(60.0, "--timeout", help="Gate timeout in seconds."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject if the revision changed before running."),
+    show_output: bool = typer.Option(False, "--show-output", help="Include a bounded output excerpt."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Run a configured argv command gate and record its evidence."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        plan = find_plan(plan_id, directory, root=root)
+        definition = find_gate_definition(plan, gate_id)
+        outcome = run_gate(definition, root=root, timeout_seconds=timeout)
+        result = record_gate_result(
+            root,
+            directory,
+            plan_id,
+            gate_id=gate_id,
+            outcome=outcome["outcome"],
+            actor=actor,
+            evidence_kind="runner",
+            batch=batch,
+            expected_revision=expected_revision if expected_revision is not None else int(plan.frontmatter["revision"]),
+            output_digest=outcome["output_digest"],
+            reason=outcome.get("reason"),
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "gate_id": gate_id,
+        "outcome": outcome["outcome"],
+        "exit_code": outcome["exit_code"],
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if show_output:
+        payload["output_excerpt"] = outcome["output_excerpt"][:2000]
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Recorded gate[/green] {gate_id}: {outcome['outcome']}")
+    if outcome["outcome"] != "passed":
+        raise typer.Exit(1)
+
+
+@gate_app.command("review")
+def plan_gate_review(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID that this review validates."),
+    gate_id: str = typer.Argument(..., help="Configured gate ID."),
+    artifact: str = typer.Argument(..., help="Path or URL of the review artifact."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    outcome: str = typer.Option("passed", "--outcome", help="passed, failed, or not-run."),
+    actor: str = typer.Option(..., "--actor", help="Human reviewer recorded as evidence."),
+    reason: str | None = typer.Option(None, "--reason", help="Required for failed or not-run outcomes."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Record durable review evidence for a review gate."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = record_gate_result(
+            root,
+            directory,
+            plan_id,
+            gate_id=gate_id,
+            outcome=outcome,
+            actor=actor,
+            evidence_kind="review",
+            batch=batch,
+            expected_revision=expected_revision,
+            artifact=artifact,
+            reason=reason,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "gate_id": gate_id,
+        "outcome": outcome,
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[green]Recorded review[/green] {gate_id}: {outcome}")
+
+
+@batch_app.command("stale")
+def plan_batch_stale(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID from the Batches table."),
+    reason: str = typer.Option(..., "--reason", help="Why the recorded evidence no longer applies."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    actor: str = typer.Option("codex", "--actor", help="Actor recorded in the audit event."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject the transition if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Mark a passed batch stale without reopening the plan status."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = mark_batch_stale(
+            root,
+            directory,
+            plan_id,
+            batch=batch,
+            reason=reason,
+            expected_revision=expected_revision,
+            actor=actor,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "status": result.plan.status,
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[yellow]Marked batch stale[/yellow] {batch} at revision {payload['revision']}")
 
 
 def main() -> None:

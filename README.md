@@ -37,7 +37,9 @@ CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
 - 符号级变更历史（old → new，按次记录，可支撑回滚）；
 - 符号关键字搜索（中英文均可）；
 - LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
-  预算的工作集，支持 LRU 置换与邻居预取。
+  预算的工作集，支持 LRU 置换与邻居预取；
+- **MCP server**：一行配置接入 Cursor / Claude Code 等 AI 工具，agent 直接
+  调用上述全部能力（见下方 [MCP server](#mcp-server-mcp-服务器)）。
 
 ## Install / 安装
 
@@ -112,6 +114,75 @@ Put this in your `AGENTS.md` / `.cursorrules`:
 - Check `codeatlas history <symbol>` before refactoring existing code.
 ```
 
+## MCP server / MCP 服务器
+
+Access all CodeAtlas capabilities from AI agents via the Model Context
+Protocol — no shell calls, no AGENTS.md conventions needed.
+
+通过 MCP（Model Context Protocol）让 AI agent 直接调用 CodeAtlas 的全部能力
+—— 无需 shell 调用，无需在 `AGENTS.md` 里写约定。
+
+Install with the MCP extra, then register the server:
+
+安装 MCP extra 后注册 server（二选一，推荐 `uvx` 方式，无需全局安装）：
+
+```bash
+pip install "codeatlas-memory[mcp]"          # or: uv sync --extra mcp
+```
+
+**Cursor** — `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "uvx",
+      "args": ["--from", "codeatlas-memory[mcp]", "codeatlas-mcp"],
+      "env": { "CODEATLAS_ROOT": "/absolute/path/to/your/project" }
+    }
+  }
+}
+```
+
+**Claude Code**:
+
+```bash
+claude mcp add codeatlas -e CODEATLAS_ROOT=/absolute/path/to/project -- uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+```
+
+`CODEATLAS_ROOT` pins the workspace when the client starts the server from an
+unknown CWD (fall-back order: tool `root` argument > env var > CWD).
+
+当客户端在未知 CWD 启动 server 时，用 `CODEATLAS_ROOT` 固定项目根
+（解析顺序：tool 的 `root` 参数 > 环境变量 > CWD）。
+
+Available tools (10) / 可用工具（10 个）：
+
+| Tool | Purpose / 用途 |
+|---|---|
+| `overview` | Read `CODEATLAS.md` architecture overview / 读取架构总览 |
+| `module_detail` | One module's symbol shard / 读取单模块符号明细 |
+| `search_symbols` | FTS search incl. Chinese / 符号搜索（支持中文） |
+| `symbol_history` | Rename-following evolution chain / 重命名跟随的演变链 |
+| `context_load` | Load one page into the token-budgeted working set / 按预算加载一页 |
+| `context_status` | Working-set status + budget bar / 工作集状态与预算 |
+| `context_evict` | Evict/pin pages / 淘汰或钉住页面 |
+| `scan_project` | Build the index (bootstrap) / 建索引（引导；大仓建议用 CLI） |
+| `update_index` | Incremental re-index after edits / 改完增量更新 |
+| `doctor` | Consistency invariants / 一致性体检 |
+
+Known limitations / 已知限制：`scan_project` / `update_index` on large repos
+can exceed client timeouts — prefer the CLI there; concurrent CLI + MCP
+working-set writes remain last-write-wins until the locking phase.
+大仓库上 `scan_project` / `update_index` 可能超出客户端超时 —— 建议改用
+CLI；CLI 与 MCP 并发写工作集仍为最后写入胜出（加锁在后续阶段）。
+
+Smoke test the server with the official inspector / 用官方 inspector 冒烟：
+
+```bash
+npx @modelcontextprotocol/inspector uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+```
+
 ## Known limitations / 已知限制
 
 - **Languages**: Python / JavaScript / TypeScript(+TSX) only for now.
@@ -139,9 +210,8 @@ Put this in your `AGENTS.md` / `.cursorrules`:
 
 ## Roadmap / 路线图
 
-- **Phase 1.5**: function-level call graphs / 函数级调用图
-- **Phase 3**: MCP server (AI tool integration), then LSP (IDE integration);
-  on-demand detail API; `--max-tokens` budget tuning / MCP 服务器优先，LSP 随后
+- **Phase 3 (done, stdio) / 已交付（stdio）**: MCP server for agent
+  integration; LSP next / MCP server 已上线（stdio），LSP 随后
 - **Phase 4**: semantic search (local embeddings) / 语义搜索（本地向量）
 - **Later**: tree-sitter expansion to Go/Rust/Java; GitHub Actions integration
   / 扩展语言与 CI 集成

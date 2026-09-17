@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-15 08:27
+generated: 2026-09-17 19:30
 language: en
-files: 46
-symbols: 329
-last_scan: 2026-09-15T00:27:05+00:00
+files: 59
+symbols: 530
+last_scan: 2026-09-17T11:30:28+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -78,20 +78,34 @@ graph TD
     d_src_codeatlas_9b8859fc --> f_atlas_consistency_py_138fcdbe
     f_odeatlas_diagrams_py_9af4eb3f["diagrams.py"]
     d_src_codeatlas_9b8859fc --> f_odeatlas_diagrams_py_9af4eb3f
+    f_c_codeatlas_gates_py_9e6ff91d["gates.py"]
+    d_src_codeatlas_9b8859fc --> f_c_codeatlas_gates_py_9e6ff91d
     f_codeatlas_indexer_py_1c986101["indexer.py"]
     d_src_codeatlas_9b8859fc --> f_codeatlas_indexer_py_1c986101
     f_odeatlas_markdown_py_92f67d62["markdown.py"]
     d_src_codeatlas_9b8859fc --> f_odeatlas_markdown_py_92f67d62
+    f_eatlas_mcp_server_py_af817111["mcp_server.py"]
+    d_src_codeatlas_9b8859fc --> f_eatlas_mcp_server_py_af817111
     f__codeatlas_memory_py_811979e0["memory.py"]
     d_src_codeatlas_9b8859fc --> f__codeatlas_memory_py_811979e0
     f__codeatlas_models_py_4449037a["models.py"]
     d_src_codeatlas_9b8859fc --> f__codeatlas_models_py_4449037a
     f__codeatlas_parser_py_25f5e1b0["parser.py"]
     d_src_codeatlas_9b8859fc --> f__codeatlas_parser_py_25f5e1b0
+    f_tlas_plan_context_py_0e972a08["plan_context.py"]
+    d_src_codeatlas_9b8859fc --> f_tlas_plan_context_py_0e972a08
+    f_atlas_plan_memory_py_d50fd2bc["plan_memory.py"]
+    d_src_codeatlas_9b8859fc --> f_atlas_plan_memory_py_d50fd2bc
+    f_las_plan_workflow_py_4b650276["plan_workflow.py"]
+    d_src_codeatlas_9b8859fc --> f_las_plan_workflow_py_4b650276
+    f_c_codeatlas_plans_py_9c9c5ceb["plans.py"]
+    d_src_codeatlas_9b8859fc --> f_c_codeatlas_plans_py_9c9c5ceb
     f_odeatlas_prefetch_py_2cc85f49["prefetch.py"]
     d_src_codeatlas_9b8859fc --> f_odeatlas_prefetch_py_2cc85f49
     f_codeatlas_scanner_py_8b5a09f9["scanner.py"]
     d_src_codeatlas_9b8859fc --> f_codeatlas_scanner_py_8b5a09f9
+    f_codeatlas_service_py_5a00dc73["service.py"]
+    d_src_codeatlas_9b8859fc --> f_codeatlas_service_py_5a00dc73
     f_codeatlas_storage_py_c8346aca["storage.py"]
     d_src_codeatlas_9b8859fc --> f_codeatlas_storage_py_c8346aca
     f_eatlas_summarizer_py_e3f8a862["summarizer.py"]
@@ -112,14 +126,26 @@ graph TD
     d_tests_b61a6d54 --> f__test_context_e2e_py_2aa49f07
     f_sts_test_diagrams_py_beb09a0a["test_diagrams.py"]
     d_tests_b61a6d54 --> f_sts_test_diagrams_py_beb09a0a
+    f_execution_quality_py_d66b8b64["test_execution_quality.py"]
+    d_tests_b61a6d54 --> f_execution_quality_py_d66b8b64
     f_ests_test_indexer_py_bec50d19["test_indexer.py"]
     d_tests_b61a6d54 --> f_ests_test_indexer_py_bec50d19
     f_sts_test_markdown_py_0ffced02["test_markdown.py"]
     d_tests_b61a6d54 --> f_sts_test_markdown_py_0ffced02
+    f_s_test_mcp_server_py_32af053d["test_mcp_server.py"]
+    d_tests_b61a6d54 --> f_s_test_mcp_server_py_32af053d
     f_tests_test_memory_py_58229cbd["test_memory.py"]
     d_tests_b61a6d54 --> f_tests_test_memory_py_58229cbd
+    f_test_memory_graph_py_e98c680d["test_memory_graph.py"]
+    d_tests_b61a6d54 --> f_test_memory_graph_py_e98c680d
     f_tests_test_parser_py_ed9d6689["test_parser.py"]
     d_tests_b61a6d54 --> f_tests_test_parser_py_ed9d6689
+    f_test_plan_context_py_08072798["test_plan_context.py"]
+    d_tests_b61a6d54 --> f_test_plan_context_py_08072798
+    f__test_plan_engine_py_7d5efd3d["test_plan_engine.py"]
+    d_tests_b61a6d54 --> f__test_plan_engine_py_7d5efd3d
+    f_est_plan_workflow_py_3b008049["test_plan_workflow.py"]
+    d_tests_b61a6d54 --> f_est_plan_workflow_py_3b008049
     f_sts_test_prefetch_py_d61dc3b5["test_prefetch.py"]
     d_tests_b61a6d54 --> f_sts_test_prefetch_py_d61dc3b5
     f_est_query_history_py_5c516287["test_query_history.py"]
@@ -180,6 +206,10 @@ classDiagram
     }
     note for c_as_models_SymbolKind_8d37c271 "extends str"
     note for c_as_models_SymbolKind_8d37c271 "extends Enum"
+    class c_tlas_plans_PlanError_f4f5a73e {
+        PlanError
+    }
+    note for c_tlas_plans_PlanError_f4f5a73e "extends Exception"
     class c_eatlas_storage_Store_1fe73e2a {
         Store
     }
@@ -197,24 +227,54 @@ classDiagram
 ```mermaid
 %% approximate
 flowchart TD
+    cg_validate_frontmatter_1c6774ad["_validate_frontmatter"]
+    cg_deatlas_plans__issue_afc19aa4["_issue"]
+    cg_validate_frontmatter_1c6774ad -->|"19"| cg_deatlas_plans__issue_afc19aa4
     cg_ripts_probe_cli_main_56c37b22["main"]
     cg_cripts_probe_cli_run_b3a806d7["run"]
     cg_ripts_probe_cli_main_56c37b22 -->|"9"| cg_cripts_probe_cli_run_b3a806d7
+    cg_ate_testing_contract_f0709078["_validate_testing_contract"]
+    cg_ate_testing_contract_f0709078 -->|"9"| cg_deatlas_plans__issue_afc19aa4
+    cg_w_record_gate_result_600fdd77["record_gate_result"]
+    cg_tlas_plans_PlanError_f4f5a73e["PlanError"]
+    cg_w_record_gate_result_600fdd77 -->|"7"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_ate_gate_definitions_7c46c09d["_validate_gate_definitions"]
+    cg_ate_gate_definitions_7c46c09d -->|"7"| cg_deatlas_plans__issue_afc19aa4
+    cg_lans__validate_tasks_ef3b4cf8["_validate_tasks"]
+    cg_lans__validate_tasks_ef3b4cf8 -->|"7"| cg_deatlas_plans__issue_afc19aa4
+    cg_s__validate_workflow_986ada7d["_validate_workflow"]
+    cg_s__validate_workflow_986ada7d -->|"7"| cg_deatlas_plans__issue_afc19aa4
     cg_s_prefetch_neighbors_69a0aae7["neighbors"]
     cg__panel_TaskPanel_add_1290b4de["add"]
     cg_s_prefetch_neighbors_69a0aae7 -->|"6"| cg__panel_TaskPanel_add_1290b4de
+    cg_passing_gate_results_1f1f170a["_require_passing_gate_results"]
+    cg_passing_gate_results_1f1f170a -->|"5"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_kflow_reapprove_plan_33be02e8["reapprove_plan"]
+    cg_kflow_reapprove_plan_33be02e8 -->|"5"| cg_tlas_plans_PlanError_f4f5a73e
     cg_grams_directory_tree_edc90507["directory_tree"]
     cg_as_diagrams__node_id_c401dc4d["_node_id"]
     cg_grams_directory_tree_edc90507 -->|"4"| cg_as_diagrams__node_id_c401dc4d
     cg___parse_js_signature_7af9866c["_parse_js_signature"]
     cg_deatlas_parser__text_d1d34230["_text"]
     cg___parse_js_signature_7af9866c -->|"4"| cg_deatlas_parser__text_d1d34230
+    cg_orkflow_approve_plan_1ada20cd["approve_plan"]
+    cg_orkflow_approve_plan_1ada20cd -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_s__split_frontmatter_850d4d39["_split_frontmatter"]
+    cg_s__split_frontmatter_850d4d39 -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
+    cg__validate_references_53f31e1b["_validate_references"]
+    cg__validate_references_53f31e1b -->|"4"| cg_deatlas_plans__issue_afc19aa4
+    cg_las_plans_parse_plan_ac238032["parse_plan"]
+    cg_las_plans_parse_plan_ac238032 -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
     cg_s_probe_indexer_main_a4ac6aa6["main"]
     cg_s_indexer_run_update_6164233b["run_update"]
     cg_s_probe_indexer_main_a4ac6aa6 -->|"3"| cg_s_indexer_run_update_6164233b
     cg_ms_inheritance_graph_8a222358["inheritance_graph"]
     cg_tlas_diagrams__clean_6b5d9662["_clean"]
     cg_ms_inheritance_graph_8a222358 -->|"3"| cg_tlas_diagrams__clean_6b5d9662
+    cg_atlas_gates_run_gate_063944e6["run_gate"]
+    cg_s_gates__sha256_text_2e96b227["_sha256_text"]
+    cg_atlas_gates_run_gate_063944e6 -->|"3"| cg_s_gates__sha256_text_2e96b227
+    cg_atlas_gates_run_gate_063944e6 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
     cg_las_indexer_run_scan_0ac7e4f9["run_scan"]
     cg_orage_Store_set_meta_2ea4c7e4["set_meta"]
     cg_las_indexer_run_scan_0ac7e4f9 -->|"3"| cg_orage_Store_set_meta_2ea4c7e4
@@ -230,6 +290,22 @@ flowchart TD
     cg___parse_js_signature_7af9866c -->|"3"| cg_tlas_parser__flatten_fb37295b
     cg___parse_py_signature_8554cf56["_parse_py_signature"]
     cg___parse_py_signature_8554cf56 -->|"3"| cg_deatlas_parser__text_d1d34230
+    cg_etrieve_plan_context_5d8219b7["retrieve_plan_context"]
+    cg_n_context__bootstrap_5872fd6f["_bootstrap"]
+    cg_etrieve_plan_context_5d8219b7 -->|"3"| cg_n_context__bootstrap_5872fd6f
+    cg_uire_execution_ready_29a66b82["_require_execution_ready"]
+    cg_uire_execution_ready_29a66b82 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_low_mark_batch_stale_c3094ea2["mark_batch_stale"]
+    cg_low_mark_batch_stale_c3094ea2 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
+    cg__normalize_repo_path_2eff0c36["_normalize_repo_path"]
+    cg__normalize_repo_path_2eff0c36 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_atlas_plans__as_list_657378cf["_as_list"]
+    cg_validate_frontmatter_1c6774ad -->|"3"| cg_atlas_plans__as_list_657378cf
+    cg_tlas_plans_find_plan_e5b0237c["find_plan"]
+    cg_tlas_plans_find_plan_e5b0237c -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_ervice_format_status_2c2abc0a["format_status"]
+    cg_ge_Store_evict_count_2c3f66e7["evict_count"]
+    cg_ervice_format_status_2c2abc0a -->|"3"| cg_ge_Store_evict_count_2c3f66e7
     cg_tch_recency_discount_16f3cb09["test_prefetch_recency_discount"]
     cg_udget_eviction_score_e3997300["eviction_score"]
     cg_tch_recency_discount_16f3cb09 -->|"3"| cg_udget_eviction_score_e3997300
@@ -240,53 +316,14 @@ flowchart TD
     cg_cycle_and_invariants_12cdbc1e -->|"3"| cg__check_refs_dangling_0565b695
     cg_trips_breaking_chars_eaacf045["test_clean_strips_breaking_chars"]
     cg_trips_breaking_chars_eaacf045 -->|"3"| cg_tlas_diagrams__clean_6b5d9662
+    cg_overview_update_flow_be50eba7["test_mcp_scan_overview_update_f…"]
+    cg_est_mcp_server__call_4a0a672c["_call"]
+    cg_overview_update_flow_be50eba7 -->|"3"| cg_est_mcp_server__call_4a0a672c
+    cg__evict_pin_semantics_08f7db71["test_service_evict_pin_semantics"]
+    cg__service_evict_pages_e456fa8a["evict_pages"]
+    cg__evict_pin_semantics_08f7db71 -->|"3"| cg__service_evict_pages_e456fa8a
     cg_detection_and_render_113d3e46["test_file_page_detection_and_re…"]
     cg_detection_and_render_113d3e46 -->|"3"| cg_memory__is_file_page_a9c1e0f6
-    cg_est_layered_locality_a554f738["test_layered_locality"]
-    cg_s_memory__build_page_93e6d209["_build_page"]
-    cg_est_layered_locality_a554f738 -->|"3"| cg_s_memory__build_page_93e6d209
-    cg_est_layered_locality_a554f738 -->|"3"| cg_s_memory_locality_of_34184314
-    cg_r_and_pin_protection_f3e84880["test_lru_eviction_order_and_pin…"]
-    cg_las_memory_load_page_33f090e0["load_page"]
-    cg_r_and_pin_protection_f3e84880 -->|"3"| cg_las_memory_load_page_33f090e0
-    cg__pages_evicted_first_9438c079["test_prefetch_pages_evicted_fir…"]
-    cg__pages_evicted_first_9438c079 -->|"3"| cg_las_memory_load_page_33f090e0
-    cg_ts_probe_parser_main_624d499e["main"]
-    cg_as_parser_parse_file_159138e2["parse_file"]
-    cg_ts_probe_parser_main_624d499e -->|"2"| cg_as_parser_parse_file_159138e2
-    cg_be_query_render_main_192b71c9["main"]
-    cg_be_query_render_main_192b71c9 -->|"2"| cg_cripts_probe_cli_run_b3a806d7
-    cg_h_rebuild_call_edges_91721405["rebuild_call_edges"]
-    cg_h_rebuild_call_edges_91721405 -->|"2"| cg_orage_Store_set_meta_2ea4c7e4
-    cg_og_write_history_doc_000f9315["write_history_doc"]
-    cg_as_changelog__fmt_ts_907c6abc["_fmt_ts"]
-    cg_og_write_history_doc_000f9315 -->|"2"| cg_as_changelog__fmt_ts_907c6abc
-    cg_Store_last_change_ts_e519d5b7["last_change_ts"]
-    cg_og_write_history_doc_000f9315 -->|"2"| cg_Store_last_change_ts_e519d5b7
-    cg__diagrams_call_graph_46ed467f["call_graph"]
-    cg__diagrams_call_graph_46ed467f -->|"2"| cg_tlas_diagrams__clean_6b5d9662
-    cg__diagrams_call_graph_46ed467f -->|"2"| cg_as_diagrams__node_id_c401dc4d
-    cg_ams_dependency_graph_2ff1aa32["dependency_graph"]
-    cg_ams_dependency_graph_2ff1aa32 -->|"2"| cg_tlas_diagrams__clean_6b5d9662
-    cg_ams_dependency_graph_2ff1aa32 -->|"2"| cg_as_diagrams__node_id_c401dc4d
-    cg_grams_directory_tree_edc90507 -->|"2"| cg__panel_TaskPanel_add_1290b4de
-    cg_grams_directory_tree_edc90507 -->|"2"| cg_tlas_diagrams__clean_6b5d9662
-    cg_ms_inheritance_graph_8a222358 -->|"2"| cg_as_diagrams__node_id_c401dc4d
-    cg_dexer_detect_renames_5fdb88f6["detect_renames"]
-    cg_dexer_detect_renames_5fdb88f6 -->|"2"| cg__panel_TaskPanel_add_1290b4de
-    cg_s_indexer__sig_shape_3a710053["_sig_shape"]
-    cg_dexer_detect_renames_5fdb88f6 -->|"2"| cg_s_indexer__sig_shape_3a710053
-    cg_down_render_overview_7f993468["render_overview"]
-    cg_s_markdown__file_row_65af00b2["_file_row"]
-    cg_down_render_overview_7f993468 -->|"2"| cg_s_markdown__file_row_65af00b2
-    cg_ted_files_for_symbol_6514933f["_related_files_for_symbol"]
-    cg_ted_files_for_symbol_6514933f -->|"2"| cg__panel_TaskPanel_add_1290b4de
-    cg_memory_ensure_budget_7b3ce7dd["ensure_budget"]
-    cg__working_set_entries_cda002e8["working_set_entries"]
-    cg_memory_ensure_budget_7b3ce7dd -->|"2"| cg__working_set_entries_cda002e8
-    cg___parse_py_signature_8554cf56 -->|"2"| cg_tlas_parser__flatten_fb37295b
-    cg_rser__py_class_bases_46031ff5["_py_class_bases"]
-    cg_rser__py_class_bases_46031ff5 -->|"2"| cg_deatlas_parser__text_d1d34230
     more_40["… 40+ edges (see call_edges table)"]
 ```
 
@@ -312,16 +349,23 @@ flowchart TD
 | `src/codeatlas/budget.py` | python | module | 5 | 0 |
 | `src/codeatlas/callgraph.py` | python | module | 8 | 0 |
 | `src/codeatlas/changelog.py` | python | module | 5 | 0 |
-| `src/codeatlas/cli.py` | python | entry | 6 | 0 |
+| `src/codeatlas/cli.py` | python | entry | 8 | 0 |
 | `src/codeatlas/consistency.py` | python | module | 7 | 0 |
 | `src/codeatlas/diagrams.py` | python | module | 7 | 0 |
+| `src/codeatlas/gates.py` | python | module | 2 | 0 |
 | `src/codeatlas/indexer.py` | python | module | 12 | 0 |
 | `src/codeatlas/markdown.py` | python | module | 6 | 0 |
+| `src/codeatlas/mcp_server.py` | python | module | 7 | 0 |
 | `src/codeatlas/memory.py` | python | module | 26 | 0 |
 | `src/codeatlas/models.py` | python | module | 3 | 0 |
 | `src/codeatlas/parser.py` | python | module | 19 | 0 |
+| `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
+| `src/codeatlas/plan_memory.py` | python | module | 11 | 0 |
+| `src/codeatlas/plan_workflow.py` | python | module | 40 | 0 |
+| `src/codeatlas/plans.py` | python | module | 34 | 0 |
 | `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
 | `src/codeatlas/scanner.py` | python | module | 2 | 0 |
+| `src/codeatlas/service.py` | python | module | 17 | 0 |
 | `src/codeatlas/storage.py` | python | module | 46 | 0 |
 | `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
 | `tests/conftest.py` | python | test | 0 | 0 |
@@ -331,10 +375,16 @@ flowchart TD
 | `tests/test_consistency_e2e.py` | python | test | 7 | 0 |
 | `tests/test_context_e2e.py` | python | test | 13 | 0 |
 | `tests/test_diagrams.py` | python | test | 10 | 0 |
+| `tests/test_execution_quality.py` | python | test | 11 | 0 |
 | `tests/test_indexer.py` | python | test | 9 | 0 |
 | `tests/test_markdown.py` | python | test | 6 | 0 |
+| `tests/test_mcp_server.py` | python | test | 25 | 0 |
 | `tests/test_memory.py` | python | test | 22 | 0 |
+| `tests/test_memory_graph.py` | python | test | 9 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
+| `tests/test_plan_context.py` | python | test | 6 | 0 |
+| `tests/test_plan_engine.py` | python | test | 16 | 0 |
+| `tests/test_plan_workflow.py` | python | test | 12 | 0 |
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
 | `tests/test_scanner.py` | python | test | 5 | 0 |
@@ -343,6 +393,8 @@ flowchart TD
 
 ## Recent Changes
 
-- [2026-09-14_1620.md](.codeatlas/history/2026-09-14_1620.md)
-- [2026-09-14_1355.md](.codeatlas/history/2026-09-14_1355.md)
-- [2026-09-14_1352.md](.codeatlas/history/2026-09-14_1352.md)
+- [2026-09-17_1926.md](.codeatlas/history/2026-09-17_1926.md)
+- [2026-09-17_1844.md](.codeatlas/history/2026-09-17_1844.md)
+- [2026-09-17_1822.md](.codeatlas/history/2026-09-17_1822.md)
+- [2026-09-17_1810.md](.codeatlas/history/2026-09-17_1810.md)
+- [2026-09-17_1809.md](.codeatlas/history/2026-09-17_1809.md)

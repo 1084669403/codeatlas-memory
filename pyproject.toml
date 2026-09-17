@@ -21,6 +21,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -37,16 +38,26 @@ dependencies = [
     "pathspec>=0.12",
 ]
 
+[project.optional-dependencies]
+# EN: MCP server extra — python-sdk v2 has breaking changes vs 1.x, pin narrowly.
+# ZH: MCP server 可选依赖 —— python-sdk v2 相对 1.x 有破坏性变更，窄版锁定。
+mcp = ["mcp>=2.0,<3"]
+
 [project.scripts]
 codeatlas = "codeatlas.cli:main"
+codeatlas-mcp = "codeatlas.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/codeatlas/codeatlas-memory"
+Repository = "https://github.com/codeatlas/codeatlas-memory"
+Issues = "https://github.com/codeatlas/codeatlas-memory/issues"
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "anyio[pytest]>=4",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -55,3 +66,4 @@ packages = ["src/codeatlas"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_mode = "auto"

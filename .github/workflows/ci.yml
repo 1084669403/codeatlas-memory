@@ -1,0 +1,35 @@
+# CodeAtlas CI — uv-based install, pytest across the supported matrix.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          # Windows runner: GBK console / path issues only surface there.
+          - os: windows-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install project (with mcp extra)
+        run: uv sync --extra mcp
+
+      - name: Run tests
+        run: uv run pytest -q

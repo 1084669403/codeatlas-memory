@@ -22,7 +22,9 @@ CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
 - 符号级变更历史（old → new，按次记录，可支撑回滚）；
 - 符号关键字搜索（中英文均可）；
 - LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
-  预算的工作集，支持 LRU 置换与邻居预取。
+  预算的工作集，支持 LRU 置换与邻居预取；
+- **MCP 服务器**：一行配置接入 Cursor / Claude Code 等 AI 工具，agent 直接
+  调用上述全部能力（见下方 [MCP 服务器](#mcp-服务器--mcp-server)）。
 
 AI coding tools (Codex, Cursor, …) have a limited context window. On large
 codebases they re-read files on every task, waste tokens, and lose track of
@@ -94,6 +96,64 @@ CODEATLAS.md                 # 总览：架构图 + 每文件一行索引
 - 重构既有代码前，先 `codeatlas history <符号>` 查看演变链。
 ```
 
+## MCP 服务器 / MCP server
+
+通过 MCP（Model Context Protocol）让 AI agent 直接调用 CodeAtlas 的全部能力
+—— 无需 shell 调用，无需在 `AGENTS.md` 里写约定。
+
+安装 MCP extra 后注册 server（推荐 `uvx` 方式，无需全局安装）：
+
+```bash
+pip install "codeatlas-memory[mcp]"          # 或: uv sync --extra mcp
+```
+
+**Cursor** —— 项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "uvx",
+      "args": ["--from", "codeatlas-memory[mcp]", "codeatlas-mcp"],
+      "env": { "CODEATLAS_ROOT": "项目根目录的绝对路径" }
+    }
+  }
+}
+```
+
+**Claude Code**:
+
+```bash
+claude mcp add codeatlas -e CODEATLAS_ROOT=项目根绝对路径 -- uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+```
+
+客户端在未知 CWD 启动 server 时，用 `CODEATLAS_ROOT` 固定项目根
+（解析顺序：tool 的 `root` 参数 > 环境变量 > CWD）。
+
+可用工具（10 个）：
+
+| 工具 | 用途 |
+|---|---|
+| `overview` | 读取 `CODEATLAS.md` 架构总览 |
+| `module_detail` | 读取单模块符号明细 |
+| `search_symbols` | 符号搜索（FTS，支持中文） |
+| `symbol_history` | 重命名跟随的符号演变链 |
+| `context_load` | 按预算加载一页进工作集 |
+| `context_status` | 工作集状态与预算进度 |
+| `context_evict` | 淘汰或钉住页面 |
+| `scan_project` | 建索引（引导；大仓库建议用 CLI） |
+| `update_index` | 改完增量更新 |
+| `doctor` | 一致性体检 |
+
+已知限制：大仓库上 `scan_project` / `update_index` 可能超出客户端超时，
+建议改用 CLI；CLI 与 MCP 并发写工作集仍为最后写入胜出（加锁在后续阶段）。
+
+用官方 inspector 冒烟验证：
+
+```bash
+npx @modelcontextprotocol/inspector uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+```
+
 English version:
 
 ```markdown
@@ -135,8 +195,7 @@ English version:
 
 ## 路线图 / Roadmap
 
-- **Phase 1.5**：函数级调用图
-- **Phase 3**：MCP 服务器（AI 工具集成）优先，LSP（IDE 集成）随后
+- **Phase 3（已交付 stdio）**：MCP 服务器已上线；LSP（IDE 集成）随后
 - **Phase 4**：语义搜索（本地向量，sqlite-vec）
 - **更远**：tree-sitter 扩展 Go/Rust/Java；GitHub Actions 集成
 
@@ -144,7 +203,7 @@ English version:
 
 ```bash
 uv sync
-uv run pytest            # 54 个测试
+uv run pytest            # 测试套件（含 MCP server 测试）
 ```
 
 License: MIT — see [LICENSE](LICENSE).

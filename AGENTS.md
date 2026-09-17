@@ -58,3 +58,24 @@ codeatlas doctor      # 6 条一致性不变量 + 预算/解析率建议；违�
   Call graph is approximate: decorator calls, dynamic dispatch, higher-order callbacks may be missing/approximate.
 - 两个终端并发写工作集是"最后写入胜出"（Phase 3 MCP 将加锁）。
   Concurrent working-set writes from two terminals are last-write-wins (locking comes with Phase 3 MCP).
+
+## Plan memory / Plan memory
+
+For non-trivial tasks, use the durable plan workflow instead of keeping state only in conversation:
+
+```bash
+codeatlas plan status --json
+codeatlas plan new <slug> . --json
+codeatlas plan approve <plan-id> . --approved-by "Human Name" --json
+codeatlas plan batch start <plan-id> B1 --expected-revision <n> --json
+codeatlas plan show <plan-id> . --view execution --json
+codeatlas plan stale . --json
+```
+
+- Before creating or revising a plan, run `codeatlas plan context "<task>" --json`
+  and use its evidence instead of browsing many files.
+- Use `plan show --view execution|engineering|evidence|graph` for bounded output.
+- One batch at a time; validation must pass before the next batch.
+- Markdown in `docs/plans/` is authoritative. `.codeatlas/plans/` is derived.
+- `codeatlas update .` reports stale plan evidence; it never rewrites plan state.
+- Do not self-approve. Human approval must be recorded through `plan approve`.

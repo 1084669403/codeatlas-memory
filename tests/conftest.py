@@ -1,4 +1,4 @@
-"""EN: Shared pytest fixtures — mini sample projects (Py/JS/TS + Chinese names).
+﻿"""EN: Shared pytest fixtures — mini sample projects (Py/JS/TS + Chinese names).
 ZH: 共享 pytest fixtures —— 小型样例项目（Py/JS/TS + 中文文件名）。
 """
 
@@ -95,4 +95,25 @@ def sample_project(tmp_path: Path) -> Path:
     (tmp_path / "node_modules" / "x.js").write_text("function bad() {}", encoding="utf-8")
     (tmp_path / ".venv").mkdir()
     (tmp_path / ".venv" / "y.py").write_text("def bad(): pass", encoding="utf-8")
+    return tmp_path
+
+@pytest.fixture
+def tmp_path(request):
+    """Provide a unique repo-local temporary directory and clean it up."""
+    import gc
+    import shutil
+    import uuid
+
+    base = Path(__file__).resolve().parent.parent / ".test-tmp"
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / uuid.uuid4().hex
+    path.mkdir()
+    yield path
+    gc.collect()
+    shutil.rmtree(path)
+
+
+@pytest.fixture
+def temp_project(tmp_path: Path) -> Path:
+    """A repo-local temporary root for plan workflow tests."""
     return tmp_path
