@@ -226,7 +226,7 @@ MCP 已经暴露 10 个工具：
 
 ## 7. 与 `plan-artifacts` 的关系
 
-当前 `docs/plans/2026-09-16-plan-artifacts-skill.md` 定义的是一个 Skill：在非平凡任务前自动生成结构化计划文件，并在批准后按计划执行。
+当前 `docs/analysis/2026-09-16-plan-artifacts-skill.md` 定义的是一个 Skill：在非平凡任务前自动生成结构化计划文件，并在批准后按计划执行。
 
 两者结合后，职责可以划分得很清楚：
 

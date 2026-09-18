@@ -115,11 +115,12 @@ audit view that also includes historical drift; the response marks its scope as
 
 `codeatlas doctor` also checks plan lint, dependency cycles, and projection
 drift. A projection can be rebuilt from Markdown; when the two disagree,
-doctor reports the drift instead of choosing a winner. Legacy Markdown without
-YAML frontmatter may remain in `docs/plans/`; plan tooling ignores it as a plan,
-while doctor emits a non-fatal warning. A passed batch can be marked stale
-explicitly with `plan batch stale`; this preserves the plan status and records a
-durable audit revision.
+doctor reports the drift instead of choosing a winner. Historical analysis and
+roadmap documents live in `docs/analysis/` or `docs/roadmaps/`; durable plan
+Markdown stays in `docs/plans/`. Plan tooling ignores non-plan Markdown beside
+plans, and doctor emits a non-fatal warning if it remains there. A passed batch
+can be marked stale explicitly with `plan batch stale`; this preserves the plan
+status and records a durable audit revision.
 
 Revalidation is explicit rather than automatic. `plan batch reopen` accepts only
 a stale batch in a done plan, requires a non-empty reason, and records a durable
