@@ -1,0 +1,42 @@
+name: Bug report
+description: Report incorrect output, a failed command, or unexpected index state.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please avoid including
+        proprietary source code or secrets in the issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include commands, a minimal repository, and relevant output.
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: source-revision
+    attributes:
+      label: CodeAtlas source revision
+      description: Include the commit hash or branch used for the source install.
+    validations:
+      required: true

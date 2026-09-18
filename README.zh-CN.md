@@ -1,209 +1,211 @@
 # CodeAtlas
 
-> 为 AI 辅助开发打造的持久代码索引与架构记忆
->
-> Persistent Code Index & Architecture Memory for AI-Assisted Development
+> 为 AI 辅助开发提供的持久代码索引与架构记忆。
 
 **本项目与其它同名 CodeAtlas 项目无关。**
 
-- [简体中文](README.zh-CN.md) | [English](README.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
----
+## 项目概览
 
-## 为什么需要 / Why
+CodeAtlas 给 AI 编程助手一个可持久保留的本地项目记忆。它索引符号、渲染架构图、
+记录函数体级别的变更历史，并把需要的上下文按页加载进受 token 预算约束的工作集，
+避免每次任务都重新读取大量文件。
 
-AI 编程工具（Codex、Cursor 等）的上下文窗口有限。面对大型代码库，它们每次
-任务都要重读文件、浪费 token，还会忘记上次会话改过什么。
+| 能力 | 作用 |
+|---|---|
+| 分层索引 | `CODEATLAS.md` 总览，加上按模块拆分的详细索引 |
+| 架构视图 | 目录树、模块依赖、类继承和近似调用图 |
+| 变更历史 | 符号演变、签名变化、重命名和每次更新中的函数体变更 |
+| 上下文虚拟内存 | 受预算约束的工作集，支持淘汰、固定和邻域预取 |
+| 持久计划 | 可审查的计划生命周期，包含批准、批次、质量门和证据 |
+| MCP 集成 | 通过 stdio 服务器向 agent 暴露同一份本地索引 |
 
-CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
+## 安装
 
-- 分层 Markdown 索引（`CODEATLAS.md` 总览 + 按模块拆分的明细）；
-- Mermaid 图（目录树、模块依赖、类继承、调用图），人与 AI 都能看懂；
-- 符号级变更历史（old → new，按次记录，可支撑回滚）；
-- 符号关键字搜索（中英文均可）；
-- LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
-  预算的工作集，支持 LRU 置换与邻居预取；
-- **MCP 服务器**：一行配置接入 Cursor / Claude Code 等 AI 工具，agent 直接
-  调用上述全部能力（见下方 [MCP 服务器](#mcp-服务器--mcp-server)）。
-
-AI coding tools (Codex, Cursor, …) have a limited context window. On large
-codebases they re-read files on every task, waste tokens, and lose track of
-what previous sessions changed.
-
-CodeAtlas gives your AI a **persistent, incrementally-updated memory** of the
-project: a layered Markdown index, Mermaid architecture diagrams, a
-symbol-level change history with rollback context, and keyword search over
-symbols (Chinese and English).
-
-## 安装 / Install
-
-需要 Python 3.11+。首次运行需联网安装依赖。
-
-Requires Python 3.11+. First run downloads dependencies (needs network once).
+> [!NOTE]
+> 当前版本通过源码安装，还没有发布到 PyPI。建议使用 Python 3.11+ 和
+> [uv](https://docs.astral.sh/uv/)。
 
 ```bash
-uv sync                       # 或: pip install -e .
+git clone https://github.com/1084669403/codeatlas-memory
+cd codeatlas-memory
+uv sync --extra mcp
 uv run codeatlas --help
 ```
 
-## 快速开始 / Quick start
+## 快速开始
+
+在要分析的仓库里运行：
 
 ```bash
-# 1. 全量扫描：生成 CODEATLAS.md 与 .codeatlas/ 内部状态
+# 建立首个索引和生成的 Markdown 视图
 codeatlas scan .
 
-# 2. AI 改完代码后 —— 增量更新：只重新解析有变化的文件，并生成变更记录
-codeatlas update .
+# 用排序后的全文检索查找符号
+codeatlas query "TaskController"
 
-# 3. 搜索符号（FTS5 trigram，支持中文）
-codeatlas query "打印消息"
-codeatlas query order_total
+# 重构前查看符号演变链
+codeatlas history TaskController
 
-# 4. 查看符号演变链（自动跟进重命名，最多 5 层）
-codeatlas history order_total
-
-# 5. 把一个符号加载进上下文工作集（虚拟内存）
-codeatlas context load order_total
+# 把一个符号加载进上下文工作集
+codeatlas context load TaskController
 codeatlas context status
 
-# 全中文输出
-codeatlas scan . --lang zh
-codeatlas update . --lang zh
+# AI 修改完成后，增量更新索引并记录历史
+codeatlas update .
 ```
 
-## 产物说明 / What gets written
+仓库自带的 `demo-todo` 包含 `TaskController`、`mark_done` 等真实示例。
 
-```
-CODEATLAS.md                 # 总览：架构图 + 每文件一行索引
-.codeatlas/
-  state.db                   # SQLite 状态库（可再生，不入库）
-  detail/<module>.md         # 按顶层目录拆分的符号级明细（可再生，不入库）
-  history/YYYY-MM-DD_HHMM.md # 每次 update 的变更记录（按设计入库）
-```
+## 架构
 
-`.codeatlas/.gitignore` 自动生成：`state.db` 与 `detail/` 是可再生派生物，
-`history/` 是持久记录，**应该**提交到 git——它是 AI 回滚与审阅的依据。
-
-## AI 使用约定 / AI usage conventions
-
-将以下内容加入你的 `AGENTS.md` / `.cursorrules`：
-
-```markdown
-- 浏览本仓库前，先读 CODEATLAS.md（总览）。
-- 只按需读取 .codeatlas/detail/<module>.md，不要一次读全部。
-- 完成修改后运行 `codeatlas update .`，保证变更历史准确。
-- 查找符号时优先用 `codeatlas query <关键词>`，而不是 grep。
-- 重构既有代码前，先 `codeatlas history <符号>` 查看演变链。
+```mermaid
+flowchart LR
+    source["源代码文件"] --> parser["解析器与扫描器"]
+    parser --> store["SQLite 索引"]
+    store --> overview["CODEATLAS.md"]
+    store --> detail[".codeatlas/detail/"]
+    store --> history[".codeatlas/history/"]
+    store --> cli["CLI"]
+    store --> mcp["MCP 服务器"]
+    cli --> vm["上下文虚拟内存"]
+    mcp --> vm
 ```
 
-## MCP 服务器 / MCP server
+CLI 和 MCP 服务器读取同一份本地索引，不需要云服务，也不依赖外部向量库。
 
-通过 MCP（Model Context Protocol）让 AI agent 直接调用 CodeAtlas 的全部能力
-—— 无需 shell 调用，无需在 `AGENTS.md` 里写约定。
+## 使用流程
 
-安装 MCP extra 后注册 server（推荐 `uvx` 方式，无需全局安装）：
+```mermaid
+flowchart TD
+    start([开始任务]) --> scan["扫描或加载现有索引"]
+    scan --> read["查询、读取历史并加载上下文"]
+    read --> budget{"还在 token 预算内吗？"}
+    budget -- "否" --> evict["淘汰或固定页面"]
+    evict --> read
+    budget -- "是" --> edit["修改代码"]
+    edit --> update["运行 codeatlas update ."]
+    update --> validate["运行测试和计划质量门"]
+    validate --> finish(["记录已验证证据"])
+```
+
+## 上下文虚拟内存
+
+`context load` 会输出一个 Markdown 页面，并把它加入有作用域的工作集。
+`context status` 显示页面、token 使用量、过期页面和预算。`context evict`
+用于淘汰页面；已固定的页面会被保留，除非显式强制淘汰。
+
+工作集按批次、计划和会话隔离。同时提供多个作用域时，优先级是
+`batch > plan > session > global`：
 
 ```bash
-pip install "codeatlas-memory[mcp]"          # 或: uv sync --extra mcp
+codeatlas context load TaskController --session refactor-auth
+codeatlas context status --session refactor-auth
+codeatlas context evict --all --session refactor-auth
 ```
 
-**Cursor** —— 项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`：
+作用域写入使用短租约，避免崩溃的写入者长期占用工作集。CLI 和 MCP 写入者
+参与同一套租约协议。
+
+## 持久计划工作流
+
+对非小改动，应把任务状态保存在仓库里，而不是只留在会话历史中：
+
+```bash
+codeatlas plan context "<任务描述>" --json
+codeatlas plan new <plan-slug> . --json
+codeatlas plan approve <plan-id> . --approved-by "人工审查者" --json
+codeatlas plan batch start <plan-id> B1 . --expected-revision <revision> --json
+codeatlas plan gate run <plan-id> B1 unit-tests . --json
+codeatlas plan batch complete <plan-id> B1 . --expected-revision <revision> --json
+```
+
+`docs/plans/` 中的 Markdown 是权威状态。质量门证据绑定到计划 revision，
+后续代码变化不会静默复用旧证据。
+
+## MCP 服务器
+
+可选的 MCP extra 会启动面向 agent 的 stdio 服务器：
+
+| 工具 | 作用 |
+|---|---|
+| `scan_project` | 建立初始索引 |
+| `update_index` | 增量更新变更文件并记录历史 |
+| `overview` | 读取 `CODEATLAS.md` |
+| `module_detail` | 读取单个模块的详细索引 |
+| `search_symbols` | 搜索符号，支持中文 |
+| `symbol_history` | 查看符号演变链 |
+| `plan_context` | 检索有界的、有证据支撑的计划上下文 |
+| `context_load` | 加载页面到工作集 |
+| `context_status` | 查看工作集状态和预算 |
+| `context_evict` | 淘汰、固定或取消固定页面 |
+| `doctor` | 执行一致性检查 |
+
+请注册本地可执行文件，而不是 PyPI 包：
 
 ```json
 {
   "mcpServers": {
     "codeatlas": {
-      "command": "uvx",
-      "args": ["--from", "codeatlas-memory[mcp]", "codeatlas-mcp"],
-      "env": { "CODEATLAS_ROOT": "项目根目录的绝对路径" }
+      "command": "/absolute/path/to/repo/.venv/bin/codeatlas-mcp",
+      "args": [],
+      "env": {
+        "CODEATLAS_ROOT": "/absolute/path/to/project"
+      }
     }
   }
 }
 ```
 
-**Claude Code**:
+Windows 使用 `.venv\\Scripts\\codeatlas-mcp.exe`。`CODEATLAS_ROOT` 设置为
+agent 要索引的仓库绝对路径。
 
-```bash
-claude mcp add codeatlas -e CODEATLAS_ROOT=项目根绝对路径 -- uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+## 生成产物
+
+```text
+CODEATLAS.md                 # 生成的总览和架构图
+.codeatlas/
+  state.db                   # SQLite 索引（可重新生成）
+  detail/                    # 生成的模块详细索引（可重新生成）
+  history/                   # 持久变更记录
 ```
 
-客户端在未知 CWD 启动 server 时，用 `CODEATLAS_ROOT` 固定项目根
-（解析顺序：tool 的 `root` 参数 > 环境变量 > CWD）。
+`.codeatlas/.gitignore` 会自动生成：`state.db` 和 `detail/` 不进入 Git，
+`history/` 可以提交。
 
-可用工具（10 个）：
+## 开发
 
-| 工具 | 用途 |
+```bash
+uv sync --extra mcp
+uv run pytest
+```
+
+CI 覆盖 Linux 上的 Python 3.11、3.12、3.13，以及 Windows 上的 Python 3.13。
+
+## 已知限制
+
+- 当前支持 Python、JavaScript、TypeScript/TSX。
+- 调用图是近似结果。装饰器调用、动态分派和高阶回调可能缺失或被近似归因。
+- 导入解析是启发式的。动态导入、别名和重导出可能被遗漏。
+- 重命名检测是启发式的，基于同文件的新增/删除符号对和兼容的签名形状。
+- 在大型仓库中，MCP 的 `scan_project` 或 `update_index` 可能超过客户端超时；
+  建议改用 CLI。
+- 当前 CI 矩阵未覆盖 macOS。
+- Windows 控制台可能替换 GBK 下不可打印的字符。
+- 当前版本不包含语义搜索、Git 感知回滚、文件监听器或描述增强。
+
+## 路线图
+
+| 阶段 | 状态 |
 |---|---|
-| `overview` | 读取 `CODEATLAS.md` 架构总览 |
-| `module_detail` | 读取单模块符号明细 |
-| `search_symbols` | 符号搜索（FTS，支持中文） |
-| `symbol_history` | 重命名跟随的符号演变链 |
-| `context_load` | 按预算加载一页进工作集 |
-| `context_status` | 工作集状态与预算进度 |
-| `context_evict` | 淘汰或钉住页面 |
-| `scan_project` | 建索引（引导；大仓库建议用 CLI） |
-| `update_index` | 改完增量更新 |
-| `doctor` | 一致性体检 |
+| 核心索引、架构图、历史记录和查询 | 完成 |
+| 持久计划生命周期和质量门证据 | 完成 |
+| MCP stdio 服务器 | 完成 |
+| 有作用域的上下文虚拟内存和短租约 | 完成 |
+| 运维加固和更多语言支持 | 下一步 |
+| 语义搜索、回滚、监听器和描述增强 | 后续，尚未开始 |
 
-已知限制：大仓库上 `scan_project` / `update_index` 可能超出客户端超时，
-建议改用 CLI；CLI 与 MCP 并发写工作集仍为最后写入胜出（加锁在后续阶段）。
+## 许可证
 
-用官方 inspector 冒烟验证：
-
-```bash
-npx @modelcontextprotocol/inspector uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
-```
-
-English version:
-
-```markdown
-- Before exploring this repo, read CODEATLAS.md (overview) first.
-- Read .codeatlas/detail/<module>.md only for the module you need.
-- After finishing changes, run `codeatlas update .` so history stays accurate.
-- Use `codeatlas query <keyword>` instead of grep when looking for symbols.
-- Check `codeatlas history <symbol>` before refactoring existing code.
-```
-
-## 变更记录长什么样 / What history looks like
-
-每次 `update` 生成 `.codeatlas/history/YYYY-MM-DD_HHMM.md`，按文件分组记录：
-
-```markdown
-## `src/service.py`
-
-- **签名变更** `src.service.order_total`
-  - old: `def order_total(items: list[int]) -> int`
-  - new: `def order_total(items: list[int], discount: float = 0.0) -> float`
-- **新增** `src.service.OrderService.refund` — `def refund(self, item: int) -> bool`
-```
-
-距离上次记录超过 30 分钟时，文档顶部会出现提示：
-"⚠️ 本记录可能未覆盖全部中间状态"——提醒 AI 谨慎回滚。
-
-## 已知限制 / Known limitations
-
-- **语言**：目前仅支持 Python / JavaScript / TypeScript(+TSX)。
-- **摘要为规则生成**：取 docstring 首行，或用双语模板补位；MVP 不含 LLM。
-- **导入边是启发式**：按文件名解析；动态导入、别名、再导出可能遗漏。
-- **重命名检测是启发式**：同文件内"增删对 + 去名签名形状一致"才判定。
-- **调用图为近似解析**：函数级调用边按启发式解析；装饰器调用、动态分派、
-  高阶回调可能缺失或归因近似；依赖图为文件级。
-- **工作集并发写为最后写入胜出**：两个终端并发写上下文工作集不加密锁
-  （Phase 3 MCP 服务器将加锁）。
-- **Windows 控制台（GBK）**：文件始终 UTF-8；交互式表格可能替换不可打印字符。
-- **联网**：仅首次 `uv sync` / `pip install` 需要网络；扫描与查询完全本地。
-
-## 路线图 / Roadmap
-
-- **Phase 3（已交付 stdio）**：MCP 服务器已上线；LSP（IDE 集成）随后
-- **Phase 4**：语义搜索（本地向量，sqlite-vec）
-- **更远**：tree-sitter 扩展 Go/Rust/Java；GitHub Actions 集成
-
-## 开发 / Development
-
-```bash
-uv sync
-uv run pytest            # 测试套件（含 MCP server 测试）
-```
-
-License: MIT — see [LICENSE](LICENSE).
+MIT。详见 [LICENSE](LICENSE)。

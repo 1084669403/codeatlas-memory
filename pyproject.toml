@@ -48,9 +48,9 @@ codeatlas = "codeatlas.cli:main"
 codeatlas-mcp = "codeatlas.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/codeatlas/codeatlas-memory"
-Repository = "https://github.com/codeatlas/codeatlas-memory"
-Issues = "https://github.com/codeatlas/codeatlas-memory/issues"
+Homepage = "https://github.com/1084669403/codeatlas-memory"
+Repository = "https://github.com/1084669403/codeatlas-memory"
+Issues = "https://github.com/1084669403/codeatlas-memory/issues"
 
 [dependency-groups]
 dev = [

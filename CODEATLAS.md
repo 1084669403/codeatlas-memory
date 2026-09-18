@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 16:34
+generated: 2026-09-18 20:12
 language: en
-files: 61
-symbols: 652
-last_scan: 2026-09-18T08:34:17+00:00
+files: 62
+symbols: 655
+last_scan: 2026-09-18T12:12:48+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -154,6 +154,8 @@ graph TD
     d_tests_b61a6d54 --> f_sts_test_prefetch_py_d61dc3b5
     f_est_query_history_py_5c516287["test_query_history.py"]
     d_tests_b61a6d54 --> f_est_query_history_py_5c516287
+    f_pository_metadata_py_003abf17["test_repository_metadata.py"]
+    d_tests_b61a6d54 --> f_pository_metadata_py_003abf17
     f_ests_test_scanner_py_a6246478["test_scanner.py"]
     d_tests_b61a6d54 --> f_ests_test_scanner_py_a6246478
     f_ests_test_storage_py_ce0ce06d["test_storage.py"]
@@ -440,14 +442,15 @@ flowchart TD
 | `tests/test_plan_workflow.py` | python | test | 18 | 0 |
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
+| `tests/test_repository_metadata.py` | python | test | 3 | 0 |
 | `tests/test_scanner.py` | python | test | 5 | 0 |
 | `tests/test_storage.py` | python | test | 8 | 0 |
 | `tests/test_summarizer.py` | python | test | 6 | 0 |
 
 ## Recent Changes
 
+- [2026-09-18_2008.md](.codeatlas/history/2026-09-18_2008.md)
+- [2026-09-18_1945.md](.codeatlas/history/2026-09-18_1945.md)
+- [2026-09-18_1942.md](.codeatlas/history/2026-09-18_1942.md)
+- [2026-09-18_1634.md](.codeatlas/history/2026-09-18_1634.md)
 - [2026-09-18_1617.md](.codeatlas/history/2026-09-18_1617.md)
-- [2026-09-18_1614.md](.codeatlas/history/2026-09-18_1614.md)
-- [2026-09-18_1547.md](.codeatlas/history/2026-09-18_1547.md)
-- [2026-09-18_1543.md](.codeatlas/history/2026-09-18_1543.md)
-- [2026-09-18_1541.md](.codeatlas/history/2026-09-18_1541.md)

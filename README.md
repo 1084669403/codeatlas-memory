@@ -1,226 +1,219 @@
 # CodeAtlas
 
-> Persistent Code Index & Architecture Memory for AI-Assisted Development
->
-> 为 AI 辅助开发打造的持久代码索引与架构记忆
+> Persistent code index and architecture memory for AI-assisted development.
 
 **This project is not affiliated with any other project named CodeAtlas.**
 
-- [English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
----
+## Overview
 
-## Why / 为什么
+CodeAtlas gives AI coding assistants a durable, local memory of a repository. It
+indexes symbols, renders architecture diagrams, records body-level change
+history, and pages selected context into a token-budgeted working set instead of
+re-reading whole files on every task.
 
-AI coding tools (Codex, Cursor, …) have a limited context window. On large
-codebases they re-read files on every task, waste tokens, and lose track of
-what previous sessions changed.
+| Capability | What it provides |
+|---|---|
+| Layered index | `CODEATLAS.md` overview plus per-module detail shards |
+| Architecture views | Directory tree, module dependencies, class inheritance, and approximate call graph |
+| Change history | Symbol evolution, signatures, renames, and body-change summaries per update |
+| Context VM | A token-budgeted working set with eviction, pinning, and prefetch |
+| Durable plans | Reviewable plan lifecycle with approvals, batches, gates, and evidence |
+| MCP integration | An agent-facing stdio server over the same local index |
 
-CodeAtlas gives your AI a **persistent, incrementally-updated memory** of the
-project:
+## Install
 
-- a layered Markdown index (`CODEATLAS.md` overview + per-module detail shards),
-- Mermaid diagrams (directory tree, module dependencies, class inheritance,
-  call graph),
-- a symbol-level change history (old → new, per update, with rollback context),
-- keyword search over symbols (Chinese and English),
-- an LLM context **virtual memory**: `context load` pages a symbol or file
-  into a token-budgeted working set with LRU eviction and neighbour prefetch.
-
-AI 编程工具（Codex、Cursor 等）的上下文窗口有限。面对大型代码库，它们每次
-任务都要重读文件、浪费 token，还会忘记上次会话改过什么。
-
-CodeAtlas 为你的 AI 提供**持久、增量更新的项目记忆**：
-
-- 分层 Markdown 索引（`CODEATLAS.md` 总览 + 按模块拆分的明细）；
-- Mermaid 图（目录树、模块依赖、类继承、调用图）；
-- 符号级变更历史（old → new，按次记录，可支撑回滚）；
-- 符号关键字搜索（中英文均可）；
-- LLM 上下文**虚拟内存**：`context load` 把符号或文件按页加载进带 token
-  预算的工作集，支持 LRU 置换与邻居预取；
-- **MCP server**：一行配置接入 Cursor / Claude Code 等 AI 工具，agent 直接
-  调用上述全部能力（见下方 [MCP server](#mcp-server-mcp-服务器)）。
-
-## Install / 安装
-
-Requires Python 3.11+. First run downloads dependencies (needs network once).
-
-需要 Python 3.11+。首次运行需联网安装依赖。
+> [!NOTE]
+> CodeAtlas is installed from source in this release. It is not published to
+> PyPI yet. Python 3.11+ and [uv](https://docs.astral.sh/uv/) are recommended.
 
 ```bash
-uv sync                       # or: pip install -e .
+git clone https://github.com/1084669403/codeatlas-memory
+cd codeatlas-memory
+uv sync --extra mcp
 uv run codeatlas --help
 ```
 
-## Quick start / 快速开始
+## Quick start
+
+Run these commands from the repository you want to understand:
 
 ```bash
-# 1. Full scan: CODEATLAS.md + .codeatlas/{detail,state.db,history}
-#    全量扫描：生成 CODEATLAS.md 与 .codeatlas/ 内部状态
+# Build the first index and generated Markdown views
 codeatlas scan .
 
-# 2. After AI edits your code — incremental: only changed files re-parsed
-#    AI 改完代码后 —— 增量更新：只重新解析有变化的文件
-codeatlas update .
+# Search symbols with ranked full-text search
+codeatlas query "TaskController"
 
-# 3. Search symbols (FTS5 trigram; Chinese works)
-#    搜索符号（FTS5 trigram，支持中文）
-codeatlas query "打印消息"
-codeatlas query order_total
+# Inspect a symbol's evolution before refactoring it
+codeatlas history TaskController
 
-# 4. A symbol's evolution chain (renames followed automatically)
-#    查看符号演变链（自动跟进重命名）
-codeatlas history order_total
-
-# 5. Load one symbol into the context working set (virtual memory)
-#    把一个符号加载进上下文工作集（虚拟内存）
-codeatlas context load order_total
+# Page one symbol into the context working set
+codeatlas context load TaskController
 codeatlas context status
 
-# Chinese output everywhere / 全中文输出
-codeatlas scan . --lang zh
-codeatlas update . --lang zh
+# After AI edits, refresh changed files and record history
+codeatlas update .
 ```
 
-## What gets written / 产物说明
+The bundled `demo-todo` project contains real examples such as `TaskController`
+and `mark_done`.
 
-```
-CODEATLAS.md                 # overview: diagrams + one-line-per-file table
-                             # 总览：架构图 + 每文件一行索引
-.codeatlas/
-  state.db                   # SQLite state (regenerable / 可再生，不入库)
-  detail/<module>.md         # full symbol detail per top-level dir
-                             # 按顶层目录拆分的符号级明细（可再生，不入库）
-  history/YYYY-MM-DD_HHMM.md # per-update change record (committed / 按设计入库)
-```
+## Architecture
 
-`.codeatlas/.gitignore` is generated automatically: `state.db` and `detail/`
-are derived artifacts, `history/` is the durable record and **is** committed.
-
-`.codeatlas/.gitignore` 自动生成：`state.db` 与 `detail/` 是可再生派生物，
-`history/` 是持久记录，**应该**提交到 git。
-
-## AI usage conventions / AI 使用约定
-
-Put this in your `AGENTS.md` / `.cursorrules`:
-
-将以下内容加入你的 `AGENTS.md` / `.cursorrules`：
-
-```markdown
-- Before exploring this repo, read CODEATLAS.md (overview) first.
-- Read .codeatlas/detail/<module>.md only for the module you need.
-- After finishing changes, run `codeatlas update .` so history stays accurate.
-- Use `codeatlas query <keyword>` instead of grep when looking for symbols.
-- Check `codeatlas history <symbol>` before refactoring existing code.
+```mermaid
+flowchart LR
+    source["Source files"] --> parser["Parser and scanner"]
+    parser --> store["SQLite index"]
+    store --> overview["CODEATLAS.md"]
+    store --> detail[".codeatlas/detail/"]
+    store --> history[".codeatlas/history/"]
+    store --> cli["CLI"]
+    store --> mcp["MCP server"]
+    cli --> vm["Context VM"]
+    mcp --> vm
 ```
 
-## MCP server / MCP 服务器
+The CLI and MCP server read the same local index. They do not require a cloud
+service or an external embedding store.
 
-Access all CodeAtlas capabilities from AI agents via the Model Context
-Protocol — no shell calls, no AGENTS.md conventions needed.
+## Usage flow
 
-通过 MCP（Model Context Protocol）让 AI agent 直接调用 CodeAtlas 的全部能力
-—— 无需 shell 调用，无需在 `AGENTS.md` 里写约定。
+```mermaid
+flowchart TD
+    start([Start a task]) --> scan["Scan or load the existing index"]
+    scan --> read["Query, read history, and load context"]
+    read --> budget{"Within token budget?"}
+    budget -- "no" --> evict["Evict or pin pages"]
+    evict --> read
+    budget -- "yes" --> edit["Edit code"]
+    edit --> update["Run codeatlas update ."]
+    update --> validate["Run tests and plan gates"]
+    validate --> finish(["Record validated evidence"])
+```
 
-Install with the MCP extra, then register the server:
+## Context VM
 
-安装 MCP extra 后注册 server（二选一，推荐 `uvx` 方式，无需全局安装）：
+`context load` prints one Markdown page and adds it to a scoped working set.
+`context status` shows pages, token use, stale pages, and budget. `context
+evict` removes pages; pinned pages are retained unless explicitly forced out.
+
+Working sets are scoped by batch, plan, and session. When more than one scope
+is supplied, the precedence is `batch > plan > session > global`:
 
 ```bash
-pip install "codeatlas-memory[mcp]"          # or: uv sync --extra mcp
+codeatlas context load TaskController --session refactor-auth
+codeatlas context status --session refactor-auth
+codeatlas context evict --all --session refactor-auth
 ```
 
-**Cursor** — `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+Scope writes use a short-lived lease so a crashed writer cannot hold a working
+set indefinitely. CLI and MCP writers participate in the same lease protocol.
+
+## Durable plan workflow
+
+For non-trivial changes, keep task state in the repository instead of in chat
+history:
+
+```bash
+codeatlas plan context "<task description>" --json
+codeatlas plan new <plan-slug> . --json
+codeatlas plan approve <plan-id> . --approved-by "Human reviewer" --json
+codeatlas plan batch start <plan-id> B1 . --expected-revision <revision> --json
+codeatlas plan gate run <plan-id> B1 unit-tests . --json
+codeatlas plan batch complete <plan-id> B1 . --expected-revision <revision> --json
+```
+
+Markdown in `docs/plans/` is authoritative. Gate evidence is checked against a
+plan revision, so a later code change cannot silently reuse old evidence.
+
+## MCP server
+
+The optional MCP extra exposes an agent-facing stdio server:
+
+| Tool | Purpose |
+|---|---|
+| `scan_project` | Build the initial index |
+| `update_index` | Re-index changed files and record history |
+| `overview` | Read `CODEATLAS.md` |
+| `module_detail` | Read one module detail shard |
+| `search_symbols` | Search symbols, including Chinese text |
+| `symbol_history` | Inspect a symbol evolution chain |
+| `plan_context` | Retrieve bounded, evidence-backed planning context |
+| `context_load` | Load a page into the working set |
+| `context_status` | Inspect working-set status and budget |
+| `context_evict` | Evict, pin, or unpin pages |
+| `doctor` | Run consistency checks |
+
+Register the local executable, not a PyPI package:
 
 ```json
 {
   "mcpServers": {
     "codeatlas": {
-      "command": "uvx",
-      "args": ["--from", "codeatlas-memory[mcp]", "codeatlas-mcp"],
-      "env": { "CODEATLAS_ROOT": "/absolute/path/to/your/project" }
+      "command": "/absolute/path/to/repo/.venv/bin/codeatlas-mcp",
+      "args": [],
+      "env": {
+        "CODEATLAS_ROOT": "/absolute/path/to/project"
+      }
     }
   }
 }
 ```
 
-**Claude Code**:
+On Windows, use `.venv\\Scripts\\codeatlas-mcp.exe`. Set `CODEATLAS_ROOT` to
+the repository that the agent should index.
 
-```bash
-claude mcp add codeatlas -e CODEATLAS_ROOT=/absolute/path/to/project -- uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
+## Generated artifacts
+
+```text
+CODEATLAS.md                 # Generated overview and diagrams
+.codeatlas/
+  state.db                   # SQLite index (regenerable)
+  detail/                    # Generated module shards (regenerable)
+  history/                   # Durable change records
 ```
 
-`CODEATLAS_ROOT` pins the workspace when the client starts the server from an
-unknown CWD (fall-back order: tool `root` argument > env var > CWD).
+`.codeatlas/.gitignore` is generated so `state.db` and `detail/` stay out of
+Git while `history/` can be committed.
 
-当客户端在未知 CWD 启动 server 时，用 `CODEATLAS_ROOT` 固定项目根
-（解析顺序：tool 的 `root` 参数 > 环境变量 > CWD）。
+## Development
 
-Available tools (10) / 可用工具（10 个）：
+```bash
+uv sync --extra mcp
+uv run pytest
+```
 
-| Tool | Purpose / 用途 |
+CI covers Linux on Python 3.11, 3.12, and 3.13, plus Windows on Python 3.13.
+
+## Known limitations
+
+- Supported languages are Python, JavaScript, and TypeScript/TSX.
+- The call graph is approximate. Decorator calls, dynamic dispatch, and
+  higher-order callbacks may be missing or attributed approximately.
+- Import resolution is heuristic. Dynamic imports, aliases, and re-exports may
+  be missed.
+- Rename detection is heuristic, based on same-file add/remove pairs and
+  compatible signature shapes.
+- Large `scan_project` or `update_index` calls through MCP may exceed client
+  timeouts; prefer the CLI for large repositories.
+- macOS is not covered by the current CI matrix.
+- Windows console output can replace characters that are not printable in GBK.
+- The current release does not include semantic search, Git-aware rollback,
+  file watchers, or description enrichment.
+
+## Roadmap
+
+| Stage | Status |
 |---|---|
-| `overview` | Read `CODEATLAS.md` architecture overview / 读取架构总览 |
-| `module_detail` | One module's symbol shard / 读取单模块符号明细 |
-| `search_symbols` | FTS search incl. Chinese / 符号搜索（支持中文） |
-| `symbol_history` | Rename-following evolution chain / 重命名跟随的演变链 |
-| `context_load` | Load one page into the token-budgeted working set / 按预算加载一页 |
-| `context_status` | Working-set status + budget bar / 工作集状态与预算 |
-| `context_evict` | Evict/pin pages / 淘汰或钉住页面 |
-| `scan_project` | Build the index (bootstrap) / 建索引（引导；大仓建议用 CLI） |
-| `update_index` | Incremental re-index after edits / 改完增量更新 |
-| `doctor` | Consistency invariants / 一致性体检 |
+| Core indexing, diagrams, history, and query | Done |
+| Durable plan lifecycle and gate evidence | Done |
+| MCP stdio server | Done |
+| Scoped context VM and short-lived leases | Done |
+| Operational hardening and broader language support | Next |
+| Semantic search, rollback, watchers, and enrichment | Later, not started |
 
-Known limitations / 已知限制：`scan_project` / `update_index` on large repos
-can exceed client timeouts — prefer the CLI there; concurrent CLI + MCP
-working-set writes remain last-write-wins until the locking phase.
-大仓库上 `scan_project` / `update_index` 可能超出客户端超时 —— 建议改用
-CLI；CLI 与 MCP 并发写工作集仍为最后写入胜出（加锁在后续阶段）。
+## License
 
-Smoke test the server with the official inspector / 用官方 inspector 冒烟：
-
-```bash
-npx @modelcontextprotocol/inspector uvx --from "codeatlas-memory[mcp]" codeatlas-mcp
-```
-
-## Known limitations / 已知限制
-
-- **Languages**: Python / JavaScript / TypeScript(+TSX) only for now.
-  目前仅支持 Python / JavaScript / TypeScript(+TSX)。
-- **Summaries are rule-based**: docstring first line, or a bilingual template;
-  no LLM is involved in the MVP. 摘要是规则生成的（docstring 首行或模板），
-  MVP 不含 LLM。
-- **Import edges are heuristic**: filename-based resolution; dynamic imports,
-  aliases and re-exports may be missed. 导入边是启发式解析（按文件名），
-  动态导入、别名等可能遗漏。
-- **Rename detection is heuristic**: same-file add+remove with identical
-  signature shape. 重命名检测是启发式（同文件增删对、签名形状一致）。
-- **Call graph is approximate**: function-level call edges are resolved
-  heuristically; decorator calls, dynamic dispatch and higher-order callbacks
-  may be missing or mis-attributed. Dependency diagrams are file-level.
-  函数级调用图为近似解析：装饰器调用、动态分派、高阶回调可能缺失或归因
-  近似；依赖图为文件级。
-- **Working-set writes are last-write-wins**: two terminals writing the
-  context working set concurrently do not lock (locking arrives with the
-  Phase 3 MCP server). 两个终端并发写上下文工作集不加密锁（最后写入胜出，
-  Phase 3 MCP 服务器将加锁）。
-- **Windows console (GBK)**: files are always UTF-8; interactive table output
-  may replace unprintable chars. Windows 控制台（GBK）：文件始终 UTF-8，
-  交互式表格输出可能替换不可打印字符。
-
-## Roadmap / 路线图
-
-- **Phase 3 (done, stdio) / 已交付（stdio）**: MCP server for agent
-  integration; LSP next / MCP server 已上线（stdio），LSP 随后
-- **Phase 4**: semantic search (local embeddings) / 语义搜索（本地向量）
-- **Later**: tree-sitter expansion to Go/Rust/Java; GitHub Actions integration
-  / 扩展语言与 CI 集成
-
-## Development / 开发
-
-```bash
-uv sync
-uv run pytest            # 54 tests
-```
-
-License: MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
