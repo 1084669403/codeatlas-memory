@@ -29,9 +29,17 @@ from .indexer import run_scan, run_update
 from .markdown import render_detail_files, render_overview
 from .memory import AmbiguousSymbol, load_page, page_cost  # noqa: F401 (re-export)
 from .models import Page
-from .plan_memory import plan_doctor_problems, plan_doctor_warnings, write_stale_report
+from .plan_memory import (
+    detect_stale_evidence,
+    load_plan_state_config,
+    plan_doctor_problems,
+    plan_doctor_warnings,
+    write_stale_report,
+)
 from .plan_context import retrieve_plan_context
 from .plan_impact import compute_plan_impact, write_update_impact_report
+from .plan_workflow import mark_batch_stale
+from .plans import PlanError, find_plan
 from .prefetch import prefetch as do_prefetch
 from .storage import Store
 
@@ -50,6 +58,7 @@ class UpdateOutcome:
     language_switched: bool  # stored output lang differed; full re-scan done
     impact_report_path: Path | None = None
     impact_report: dict | None = None
+    plan_state_report: dict | None = None
 
 
 # ---------------------------------------------------------------- store helpers
@@ -59,6 +68,73 @@ def open_store(root: Path) -> Store:
     codeatlas_dir = root / ".codeatlas"
     codeatlas_dir.mkdir(parents=True, exist_ok=True)
     return Store(codeatlas_dir / "state.db")
+
+
+def _mark_stale_passed_batches(root: Path, plans_dir: Path, stale_report: dict) -> dict:
+    """Mark passed batches stale through the canonical plan workflow."""
+    root_path = root.resolve()
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for item in stale_report.get("items", []):
+        key = (str(item.get("plan_id", "")), str(item.get("batch", "")))
+        groups.setdefault(key, []).append(item)
+
+    marked: list[dict] = []
+    skipped: list[dict] = []
+    for (plan_id, batch), items in sorted(groups.items()):
+        gates = sorted({str(item.get("gate_id", "")) for item in items if str(item.get("gate_id", "")).strip()})
+        try:
+            plan = find_plan(plan_id, plans_dir, root=root_path)
+        except PlanError as exc:
+            skipped.append(
+                {
+                    "batch": batch,
+                    "code": exc.code,
+                    "message": exc.message,
+                    "plan_id": plan_id,
+                }
+            )
+            continue
+        row = next((entry for entry in plan.batches if str(entry.get("batch", "")) == batch), None)
+        if row is None or str(row.get("status", "")) != "passed":
+            skipped.append(
+                {
+                    "batch": batch,
+                    "code": "BATCH_NOT_PASSED",
+                    "message": "Only a passed batch is eligible for update-time stale marking.",
+                    "plan_id": plan_id,
+                }
+            )
+            continue
+        try:
+            result = mark_batch_stale(
+                root_path,
+                plans_dir,
+                plan_id,
+                batch=batch,
+                reason="Update changed declared batch inputs; gate fingerprints no longer match: "
+                + (", ".join(gates) if gates else "unknown gates"),
+                actor="codeatlas-update",
+            )
+        except PlanError as exc:
+            skipped.append(
+                {
+                    "batch": batch,
+                    "code": exc.code,
+                    "message": exc.message,
+                    "plan_id": plan_id,
+                }
+            )
+            continue
+        marked.append(
+            {
+                "batch": batch,
+                "gates": gates,
+                "plan_id": plan_id,
+                "revision": int(result.plan.frontmatter["revision"]),
+                "snapshot_path": result.snapshot_path.relative_to(root_path).as_posix(),
+            }
+        )
+    return {"allow_update_plan_state": True, "marked": marked, "skipped": skipped}
 
 
 def require_store(root: Path) -> Store:
@@ -138,7 +214,26 @@ def update_project(root: Path, lang: str = "en", max_tokens: int | None = None) 
             codeatlas_dir / "history", store, result.changes, result.timestamp,
             lang=lang, files_parsed=result.files_parsed, files_scanned=result.files_scanned,
         )
-        write_stale_report(root, root / "docs" / "plans")
+        plans_dir = root / "docs" / "plans"
+        stale_report = detect_stale_evidence(root, plans_dir)
+        plan_state_config = load_plan_state_config(root)
+        if plan_state_config["allow_update_plan_state"]:
+            plan_state_report = _mark_stale_passed_batches(root, plans_dir, stale_report)
+        else:
+            plan_state_report = {
+                "allow_update_plan_state": False,
+                "marked": [],
+                "skipped": [
+                    {
+                        "batch": str(item.get("batch", "")),
+                        "code": "PLAN_STATE_WRITE_DISABLED",
+                        "message": "Plan-state writing is disabled; run the canonical stale workflow explicitly.",
+                        "plan_id": str(item.get("plan_id", "")),
+                    }
+                    for item in stale_report.get("items", [])
+                ],
+            }
+        write_stale_report(root, plans_dir)
         changed_files = sorted({str(change.file) for change in result.changes})
         changed_symbols = sorted({str(change.symbol) for change in result.changes})
         source_paths_by_symbol = {
@@ -158,6 +253,7 @@ def update_project(root: Path, lang: str = "en", max_tokens: int | None = None) 
         result=result, fell_back=False, history_path=history_path, language_switched=switched,
         impact_report_path=impact_report_path,
         impact_report=impact_report,
+        plan_state_report=plan_state_report,
     )
 
 

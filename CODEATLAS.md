@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 09:32
+generated: 2026-09-18 15:00
 language: en
 files: 61
-symbols: 563
-last_scan: 2026-09-18T01:32:23+00:00
+symbols: 581
+last_scan: 2026-09-18T07:00:20+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -303,6 +303,8 @@ flowchart TD
     cg_etrieve_plan_context_5d8219b7 -->|"3"| cg_n_context__bootstrap_5872fd6f
     cg___symbol_source_path_5bda0d6d["_symbol_source_path"]
     cg__compute_plan_impact_c4444998 -->|"3"| cg___symbol_source_path_5bda0d6d
+    cg_ad_plan_state_config_d51e0782["load_plan_state_config"]
+    cg_ad_plan_state_config_d51e0782 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
     cg_uire_execution_ready_29a66b82["_require_execution_ready"]
     cg_uire_execution_ready_29a66b82 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
     cg_low_mark_batch_stale_c3094ea2["mark_batch_stale"]
@@ -324,8 +326,6 @@ flowchart TD
     cg_cycle_and_invariants_12cdbc1e -->|"3"| cg_tency_check_fts_sync_414a03e5
     cg__check_refs_dangling_0565b695["check_refs_dangling"]
     cg_cycle_and_invariants_12cdbc1e -->|"3"| cg__check_refs_dangling_0565b695
-    cg_trips_breaking_chars_eaacf045["test_clean_strips_breaking_chars"]
-    cg_trips_breaking_chars_eaacf045 -->|"3"| cg_tlas_diagrams__clean_6b5d9662
     more_40["… 40+ edges (see call_edges table)"]
 ```
 
@@ -363,12 +363,12 @@ flowchart TD
 | `src/codeatlas/parser.py` | python | module | 19 | 0 |
 | `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
 | `src/codeatlas/plan_impact.py` | python | module | 10 | 0 |
-| `src/codeatlas/plan_memory.py` | python | module | 12 | 0 |
-| `src/codeatlas/plan_workflow.py` | python | module | 41 | 0 |
+| `src/codeatlas/plan_memory.py` | python | module | 13 | 0 |
+| `src/codeatlas/plan_workflow.py` | python | module | 42 | 0 |
 | `src/codeatlas/plans.py` | python | module | 34 | 0 |
 | `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
 | `src/codeatlas/scanner.py` | python | module | 2 | 0 |
-| `src/codeatlas/service.py` | python | module | 18 | 0 |
+| `src/codeatlas/service.py` | python | module | 19 | 0 |
 | `src/codeatlas/storage.py` | python | module | 46 | 0 |
 | `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
 | `tests/conftest.py` | python | test | 0 | 0 |
@@ -378,14 +378,14 @@ flowchart TD
 | `tests/test_consistency_e2e.py` | python | test | 7 | 0 |
 | `tests/test_context_e2e.py` | python | test | 13 | 0 |
 | `tests/test_diagrams.py` | python | test | 10 | 0 |
-| `tests/test_execution_quality.py` | python | test | 11 | 0 |
+| `tests/test_execution_quality.py` | python | test | 16 | 0 |
 | `tests/test_indexer.py` | python | test | 9 | 0 |
 | `tests/test_markdown.py` | python | test | 6 | 0 |
 | `tests/test_mcp_server.py` | python | test | 25 | 0 |
 | `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_memory_graph.py` | python | test | 9 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
-| `tests/test_phase3_plan_impact.py` | python | test | 14 | 0 |
+| `tests/test_phase3_plan_impact.py` | python | test | 24 | 0 |
 | `tests/test_plan_context.py` | python | test | 6 | 0 |
 | `tests/test_plan_engine.py` | python | test | 16 | 0 |
 | `tests/test_plan_workflow.py` | python | test | 18 | 0 |
@@ -397,8 +397,8 @@ flowchart TD
 
 ## Recent Changes
 
-- [2026-09-18_0928.md](.codeatlas/history/2026-09-18_0928.md)
-- [2026-09-17_2057.md](.codeatlas/history/2026-09-17_2057.md)
-- [2026-09-17_2055.md](.codeatlas/history/2026-09-17_2055.md)
-- [2026-09-17_2053.md](.codeatlas/history/2026-09-17_2053.md)
-- [2026-09-17_1930.md](.codeatlas/history/2026-09-17_1930.md)
+- [2026-09-18_1135.md](.codeatlas/history/2026-09-18_1135.md)
+- [2026-09-18_1112.md](.codeatlas/history/2026-09-18_1112.md)
+- [2026-09-18_1048.md](.codeatlas/history/2026-09-18_1048.md)
+- [2026-09-18_1045.md](.codeatlas/history/2026-09-18_1045.md)
+- [2026-09-18_1043.md](.codeatlas/history/2026-09-18_1043.md)

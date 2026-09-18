@@ -59,6 +59,54 @@ def _approved_plan_with_command_gate(temp_project: Path):
     )
 
 
+def _approved_plan_with_test_reference(temp_project: Path, file_reference: str):
+    created = create_plan(temp_project, temp_project / "docs" / "plans", slug="execution-smoke")
+    created.plan.frontmatter["testing"]["tests"][0]["files"] = [file_reference]
+    created.plan.frontmatter["content_hash"] = canonical_plan_hash(created.plan)
+    created.plan.path.write_text(
+        f"---\n{yaml.safe_dump(created.plan.frontmatter, sort_keys=True, allow_unicode=True)}---\n{created.plan.body}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    revised = revise_plan(
+        temp_project,
+        created.plan.path.parent,
+        created.plan.id,
+        allow_stale=True,
+        reason="Use a directory or glob test reference",
+    )
+    return approve_plan(
+        temp_project,
+        revised.plan.path.parent,
+        revised.plan.id,
+        approved_by="human-reviewer",
+        expected_revision=2,
+    )
+
+
+def _start_and_pass_gate(temp_project: Path, approved, actor: str = "codex", gate_revision: int = 4):
+    started = start_batch(
+        temp_project,
+        approved.plan.path.parent,
+        approved.plan.id,
+        batch="B1",
+        expected_revision=3,
+        actor=actor,
+    )
+    return started, record_gate_result(
+        temp_project,
+        started.plan.path.parent,
+        started.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=gate_revision,
+        output_digest="sha256:fixed",
+    )
+
+
 def test_start_batch_records_state_revision(temp_project: Path) -> None:
     approved = _approved_plan(temp_project)
 
@@ -149,6 +197,55 @@ def test_record_gate_result_and_complete_batch(temp_project: Path) -> None:
     )
     assert completed.plan.batches[0]["status"] == "passed"
     assert completed.plan.tasks[0]["status"] == "done"
+
+
+def test_complete_batch_accepts_directory_reference(temp_project: Path) -> None:
+    approved = _approved_plan_with_test_reference(temp_project, "tests/")
+    test_path = temp_project / "tests" / "test_execution_smoke.py"
+    test_path.parent.mkdir()
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    _, recorded = _start_and_pass_gate(temp_project, approved)
+
+    completed = complete_batch(
+        temp_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=5,
+        actor="codex",
+    )
+
+    assert completed.plan.batches[0]["status"] == "passed"
+
+
+def test_complete_batch_accepts_controlled_glob_reference(temp_project: Path) -> None:
+    approved = _approved_plan_with_test_reference(temp_project, "tests/test_*.py")
+    test_path = temp_project / "tests" / "test_execution_smoke.py"
+    test_path.parent.mkdir()
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    _, recorded = _start_and_pass_gate(temp_project, approved)
+
+    completed = complete_batch(
+        temp_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=5,
+        actor="codex",
+    )
+
+    assert completed.plan.batches[0]["status"] == "passed"
+
+
+def test_complete_batch_rejects_reference_outside_project_root(temp_project: Path) -> None:
+    approved = _approved_plan_with_test_reference(temp_project, "../outside.py")
+    test_path = temp_project / "tests" / "test_execution_smoke.py"
+    test_path.parent.mkdir()
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    with pytest.raises(PlanError) as raised:
+        _start_and_pass_gate(temp_project, approved)
+
+    assert raised.value.code == "PLAN_OUTSIDE_ROOT"
 
 
 def test_complete_batch_rejects_unbound_gate_result(temp_project: Path) -> None:

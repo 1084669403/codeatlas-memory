@@ -643,13 +643,13 @@ def start_batch(
     expected_revision: int | None = None,
     actor: str = "codex",
 ) -> WorkflowResult:
-    """Start one pending or blocked batch and its linked tasks."""
+    """Start one pending, blocked, or stale batch and its linked tasks."""
     root_path = Path(root).resolve()
     directory = _plans_dir(root_path, Path(plans_dir))
     plan = find_plan(plan_id, directory, root=root_path)
     _require_execution_ready(plan, expected_revision=expected_revision, actor=actor)
     row = _batch_row(plan, batch)
-    if str(row.get("status", "")) not in {"pending", "blocked"}:
+    if str(row.get("status", "")) not in {"pending", "blocked", "stale"}:
         raise PlanError(
             "INVALID_TRANSITION",
             f"Batch {batch} cannot start from status {row.get('status')}.",
@@ -659,7 +659,7 @@ def start_batch(
 
     row["status"] = "in-progress"
     for task in plan.tasks:
-        if str(task.get("batch", "")) == batch and task.get("status") in {"pending", "blocked"}:
+        if str(task.get("batch", "")) == batch and task.get("status") in {"pending", "blocked", "done"}:
             task["status"] = "in-progress"
     plan.frontmatter["status"] = "executing"
     plan.frontmatter["batch_started_revision"] = int(plan.frontmatter["revision"])
@@ -1003,11 +1003,32 @@ def _require_test_contract(plan: Plan, batch: str, root: Path) -> None:
                 path=plan.source_path,
             )
         relative = str(references[0]).split("::", 1)[0]
-        path = (root_path / relative).resolve()
-        if not path.is_file() or not path.is_relative_to(root_path):
+        if not _test_reference_matches(relative, root_path):
             raise PlanError(
                 "TEST_CONTRACT_MISMATCH",
-                f"Batch {batch} test file does not exist: {relative}",
+                f"Batch {batch} test reference does not resolve to contained test files: {relative}",
                 field=f"testing.tests.{test.get('test_id')}.files",
                 path=plan.source_path,
             )
+
+
+def _test_reference_matches(reference: str, root_path: Path) -> bool:
+    """Resolve one test contract reference without allowing root escape."""
+    try:
+        if any(character in reference for character in "*?["):
+            matches = list(root_path.glob(reference))
+            if not matches:
+                return False
+            return all(
+                match.resolve().is_relative_to(root_path) and match.is_file()
+                for match in matches
+            )
+
+        path = (root_path / reference).resolve()
+        if not path.is_relative_to(root_path):
+            return False
+        if path.is_dir():
+            return any(item.is_file() for item in path.rglob("*"))
+        return path.is_file()
+    except (OSError, ValueError, NotImplementedError):
+        return False

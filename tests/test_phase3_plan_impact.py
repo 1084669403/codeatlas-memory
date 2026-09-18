@@ -8,10 +8,118 @@ from codeatlas.cli import app
 from codeatlas.indexer import run_scan
 from codeatlas.mcp_server import build_server
 from codeatlas.plan_impact import PlanError, compute_plan_impact
+from codeatlas.plan_memory import load_plan_state_config
+from codeatlas.plan_workflow import approve_plan, complete_batch, create_plan, record_gate_result, revise_plan, start_batch
+from codeatlas.plans import find_plan
 from codeatlas.service import plan_impact as service_plan_impact
 from codeatlas.plan_memory import plan_doctor_warnings
 from codeatlas.service import scan_project, update_project
 from codeatlas.storage import Store
+
+
+def _completed_update_plan(root):
+    scan_project(root)
+    created = create_plan(root, root / "docs" / "plans", slug="stale-write")
+    approved = approve_plan(
+        root,
+        created.plan.path.parent,
+        created.plan.id,
+        approved_by="human-reviewer",
+        expected_revision=1,
+    )
+    started = start_batch(
+        root,
+        approved.plan.path.parent,
+        approved.plan.id,
+        batch="B1",
+        expected_revision=2,
+    )
+    test_path = root / "tests" / "test_stale_write.py"
+    test_path.parent.mkdir(exist_ok=True)
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    recorded = record_gate_result(
+        root,
+        started.plan.path.parent,
+        started.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=3,
+        output_digest="sha256:fixed",
+    )
+    complete_batch(
+        root,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=4,
+    )
+    return created.plan
+
+
+def _open_plan_with_completed_batch(root):
+    scan_project(root)
+    created = create_plan(root, root / "docs" / "plans", slug="stale-restart")
+    plan_path = created.plan.path
+    text = plan_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "| 1 | B1 | TODO | none | medium | none | none | unit-tests gate | pending |\n",
+        "| 1 | B1 | TODO | none | medium | none | none | unit-tests gate | pending |\n"
+        "| 2 | B2 | Prepare follow-up work | B1 | low | none | none | unit-tests gate | pending |\n",
+    )
+    text = text.replace(
+        "| B1 | First validated batch | none | pending | none |\n",
+        "| B1 | First validated batch | none | pending | none |\n"
+        "| B2 | Follow-up batch | B1 | pending | none |\n",
+    )
+    plan_path.write_text(text, encoding="utf-8", newline="\n")
+    revised = revise_plan(
+        root,
+        plan_path.parent,
+        created.plan.id,
+        expected_revision=1,
+        allow_stale=True,
+        reason="Add a follow-up batch so the plan remains open after B1",
+    )
+    approved = approve_plan(
+        root,
+        revised.plan.path.parent,
+        revised.plan.id,
+        approved_by="human-reviewer",
+        expected_revision=2,
+    )
+    started = start_batch(
+        root,
+        approved.plan.path.parent,
+        approved.plan.id,
+        batch="B1",
+        expected_revision=3,
+    )
+    test_path = root / "tests" / "test_stale_restart.py"
+    test_path.parent.mkdir(exist_ok=True)
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    recorded = record_gate_result(
+        root,
+        started.plan.path.parent,
+        started.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=4,
+        output_digest="sha256:fixed",
+    )
+    complete_batch(
+        root,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=5,
+    )
+    return created.plan
 
 
 def write_plan(
@@ -438,6 +546,20 @@ def test_update_cli_prints_affected_plans(sample_project):
     assert "src/service.py" in result.output
 
 
+def test_cli_update_reports_canonical_stale_marking(sample_project):
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["update", str(sample_project)])
+
+    assert result.exit_code == 0, result.output
+    assert "Plan state updates" in result.output
+    assert plan.id in result.output
+    assert "Marked batch B1 stale for revalidation" in result.output
+
+
 async def test_mcp_update_reports_affected_plans(sample_project):
     scan_project(sample_project)
     write_plan(
@@ -482,3 +604,186 @@ def test_doctor_reports_unresolved_plan_symbols(sample_project):
 
     assert any("plan unresolved symbol: open-plan: does.not.exist" in warning for warning in warnings)
     assert not any("plan unresolved symbol: open-plan: service" in warning for warning in warnings)
+
+
+def test_plan_state_config_defaults_and_overrides(tmp_path):
+    assert load_plan_state_config(tmp_path) == {"allow_update_plan_state": True}
+
+    (tmp_path / "codeatlas.config.json").write_text(
+        '{"allow_update_plan_state": false}\n', encoding="utf-8"
+    )
+
+    assert load_plan_state_config(tmp_path) == {"allow_update_plan_state": False}
+
+
+def test_invalid_plan_state_config_is_rejected(tmp_path):
+    (tmp_path / "codeatlas.config.json").write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(PlanError) as raised:
+        load_plan_state_config(tmp_path)
+
+    assert raised.value.code == "PLAN_CONFIG_INVALID"
+
+
+def test_update_marks_passed_affected_batch_stale(sample_project):
+    plan = _completed_update_plan(sample_project)
+    target = sample_project / "tests" / "test_stale_write.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+
+    outcome = update_project(sample_project)
+
+    marking = outcome.plan_state_report
+    assert marking["allow_update_plan_state"] is True
+    assert marking["marked"] == [
+        {
+            "batch": "B1",
+            "gates": ["unit-tests"],
+            "plan_id": plan.id,
+            "revision": 6,
+            "snapshot_path": f"docs/plans/revisions/{plan.id}/0006.md",
+        }
+    ]
+    refreshed = find_plan(plan.id, plan.path.parent, root=sample_project)
+    assert refreshed.batches[0]["status"] == "stale"
+    assert refreshed.frontmatter["revision"] == 6
+    assert refreshed.frontmatter["stale_evidence"][-1]["batch"] == "B1"
+    assert refreshed.frontmatter["status"] == "done"
+
+
+def test_update_without_write_authority_is_report_only(sample_project):
+    plan = _completed_update_plan(sample_project)
+    target = sample_project / "tests" / "test_stale_write.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+    (sample_project / "codeatlas.config.json").write_text(
+        '{"allow_update_plan_state": false}\n', encoding="utf-8"
+    )
+    before = plan.path.read_bytes()
+
+    outcome = update_project(sample_project)
+
+    marking = outcome.plan_state_report
+    assert marking["allow_update_plan_state"] is False
+    assert marking["marked"] == []
+    assert marking["skipped"] == [
+        {
+            "batch": "B1",
+            "code": "PLAN_STATE_WRITE_DISABLED",
+            "message": "Plan-state writing is disabled; run the canonical stale workflow explicitly.",
+            "plan_id": plan.id,
+        }
+    ]
+    assert plan.path.read_bytes() == before
+    refreshed = find_plan(plan.id, plan.path.parent, root=sample_project)
+    assert refreshed.batches[0]["status"] == "passed"
+
+
+def test_update_does_not_remark_stale_batch(sample_project):
+    plan = _completed_update_plan(sample_project)
+    target = sample_project / "tests" / "test_stale_write.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+    update_project(sample_project)
+
+    stale = find_plan(plan.id, plan.path.parent, root=sample_project)
+    before = stale.path.read_bytes()
+    revision = stale.frontmatter["revision"]
+    evidence_count = len(stale.frontmatter["stale_evidence"])
+
+    outcome = update_project(sample_project)
+    refreshed = find_plan(plan.id, plan.path.parent, root=sample_project)
+
+    assert outcome.plan_state_report["marked"] == []
+    assert outcome.plan_state_report["skipped"][0]["code"] == "BATCH_NOT_PASSED"
+    assert refreshed.path.read_bytes() == before
+    assert refreshed.frontmatter["revision"] == revision
+    assert len(refreshed.frontmatter["stale_evidence"]) == evidence_count
+
+
+def test_stale_detection_uses_latest_gate_evidence(sample_project):
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+
+    update_project(sample_project)
+    stale = find_plan(plan.id, plan.path.parent, root=sample_project)
+    assert stale.batches[0]["status"] == "stale"
+
+    restarted = start_batch(
+        sample_project,
+        stale.path.parent,
+        stale.id,
+        batch="B1",
+        expected_revision=7,
+    )
+    recorded = record_gate_result(
+        sample_project,
+        restarted.plan.path.parent,
+        restarted.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=8,
+        output_digest="sha256:fixed",
+    )
+    complete_batch(
+        sample_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=9,
+    )
+
+    outcome = update_project(sample_project)
+    refreshed = find_plan(plan.id, plan.path.parent, root=sample_project)
+
+    assert outcome.plan_state_report["marked"] == []
+    assert refreshed.batches[0]["status"] == "passed"
+
+
+def test_stale_batch_can_restart_for_fresh_evidence(sample_project):
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
+    target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
+
+    outcome = update_project(sample_project)
+    assert outcome.plan_state_report["marked"][0]["batch"] == "B1"
+
+    stale = find_plan(plan.id, plan.path.parent, root=sample_project)
+    assert stale.status == "executing"
+    assert stale.batches[0]["status"] == "stale"
+
+    restarted = start_batch(
+        sample_project,
+        stale.path.parent,
+        stale.id,
+        batch="B1",
+        expected_revision=7,
+    )
+    assert restarted.plan.status == "executing"
+    assert restarted.plan.batches[0]["status"] == "in-progress"
+    assert restarted.plan.tasks[0]["status"] == "in-progress"
+    assert restarted.plan.frontmatter["batch_started_revision"] == 7
+
+    recorded = record_gate_result(
+        sample_project,
+        restarted.plan.path.parent,
+        restarted.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=8,
+        output_digest="sha256:fresh",
+    )
+    completed = complete_batch(
+        sample_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=9,
+    )
+    assert completed.plan.status == "executing"
+    assert completed.plan.batches[0]["status"] == "passed"
+    assert completed.plan.tasks[0]["status"] == "done"

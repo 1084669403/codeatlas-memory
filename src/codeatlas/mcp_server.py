@@ -142,6 +142,22 @@ def build_server():
                     for plan in affected
                 )
                 message += f" Affected plans: {rendered}."
+            plan_state = outcome.plan_state_report or {}
+            marked = plan_state.get("marked", [])
+            skipped = plan_state.get("skipped", [])
+            if marked:
+                rendered = ", ".join(
+                    f"{item['plan_id']}/{item['batch']}" for item in marked
+                )
+                message += f" Marked stale for revalidation: {rendered}."
+            elif skipped:
+                rendered = ", ".join(
+                    f"{item['plan_id']}/{item['batch']} ({item['code']})"
+                    for item in skipped
+                )
+                message += f" Plan-state writes skipped: {rendered}."
+            elif plan_state.get("allow_update_plan_state") is False:
+                message += " Plan-state writes are disabled; stale evidence is report-only."
             return message
         except FileNotFoundError as e:
             return str(e)

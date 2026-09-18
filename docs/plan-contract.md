@@ -95,12 +95,19 @@ output digest or artifact, plan revision, batch input fingerprint, and a hash of
 the gate definition. ``batch complete`` rejects evidence that is unbound, lacks a
 fingerprint, or no longer matches the batch inputs.
 
+Structured test contracts can reference a file, a directory that contains at
+least one file, or a project-root-relative glob that matches at least one file.
+References are resolved inside the project root; paths or glob matches outside
+the root are rejected.
+
 ## Memory graph and stale evidence
 
-`plan stale` compares recorded batch input fingerprints with the current
-referenced files, symbols, and gate definitions. It reports stale evidence as
-bounded JSON and never changes a plan. `codeatlas update .` writes
-`.codeatlas/plans/stale-report.json` with the same read-only contract.
+`plan stale` compares the latest recorded gate evidence for each batch and gate
+with the current referenced files, symbols, and gate definitions. Older results
+remain in the audit trail but do not determine the current stale signal. It
+reports stale evidence as bounded JSON and never changes a plan.
+`codeatlas update .` writes `.codeatlas/plans/stale-report.json` with the same
+read-only contract.
 
 `codeatlas doctor` also checks plan lint, dependency cycles, and projection
 drift. A projection can be rebuilt from Markdown; when the two disagree,
@@ -117,6 +124,14 @@ results while changing the batch, its linked tasks, and the plan to `blocked`.
 A subsequent `plan batch start` moves the reopened batch back into execution and
 advances the batch-start revision, so completion can use only fresh gate
 evidence recorded after that restart.
+
+The same rule applies to open plans. `codeatlas update .` compares recorded
+batch input fingerprints and, when `allow_update_plan_state` is true, marks only
+`passed` batches stale through `plan_workflow.mark_batch_stale`. The setting
+defaults to true and may be disabled in `codeatlas.config.json`. When disabled,
+update is report-only and leaves plan Markdown unchanged. Stale batches in open
+plans may be restarted with `plan batch start`; done plans still require the
+explicit `plan batch reopen` transition.
 
 ## Plan context
 

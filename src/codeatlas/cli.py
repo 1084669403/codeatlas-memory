@@ -156,6 +156,23 @@ def update(
             console.print(f"- {plan['plan_id']} [{batches}] -> {refs}")
     for warning in (outcome.impact_report or {}).get("warnings", []):
         err_console.print(f"[yellow]Plan impact {warning['code']}: {warning['message']}[/yellow]")
+    plan_state = outcome.plan_state_report or {}
+    marked_batches = plan_state.get("marked", [])
+    skipped_batches = plan_state.get("skipped", [])
+    if marked_batches or skipped_batches:
+        console.print("[bold]Plan state updates[/bold]")
+        for item in marked_batches:
+            console.print(
+                f"[yellow]Marked batch {item['batch']} stale for revalidation: "
+                f"{item['plan_id']}[/yellow]"
+            )
+        for item in skipped_batches:
+            console.print(
+                f"[yellow]Skipped plan state write {item['plan_id']} batch {item['batch']}: "
+                f"{item['code']}[/yellow]"
+            )
+    elif plan_state.get("allow_update_plan_state") is False:
+        console.print("[yellow]Plan-state writes are disabled; stale evidence is report-only.[/yellow]")
 
 
 @app.command()

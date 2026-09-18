@@ -16,6 +16,41 @@ from .plans import Plan, PlanError, is_plan_file, lint_plans, parse_plan, plan_g
 from .storage import Store
 
 
+def load_plan_state_config(root: str | Path) -> dict[str, Any]:
+    """Load the explicit update-time plan-state write authority for one project."""
+    root_path = Path(root).resolve()
+    config_path = root_path / "codeatlas.config.json"
+    if not config_path.is_file():
+        return {"allow_update_plan_state": True}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PlanError(
+            "PLAN_CONFIG_INVALID",
+            f"Could not read project configuration: {exc}",
+            path=config_path.as_posix(),
+        ) from exc
+    if not isinstance(payload, dict):
+        raise PlanError(
+            "PLAN_CONFIG_INVALID",
+            "Project configuration must be a JSON object.",
+            path=config_path.as_posix(),
+        )
+    if "allow_update_plan_state" in payload:
+        value = payload["allow_update_plan_state"]
+        if not isinstance(value, bool):
+            raise PlanError(
+                "PLAN_CONFIG_INVALID",
+                "allow_update_plan_state must be a boolean.",
+                field="allow_update_plan_state",
+                path=config_path.as_posix(),
+            )
+        allowed = value
+    else:
+        allowed = True
+    return {"allow_update_plan_state": allowed}
+
+
 def _sha256_json(value: Any) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
@@ -131,10 +166,17 @@ def detect_stale_evidence(root: str | Path, plans_dir: str | Path) -> dict[str, 
         except PlanError as exc:
             errors.append({"code": exc.code, "message": exc.message, "path": path.as_posix()})
             continue
+        latest_results: dict[tuple[str, str], dict] = {}
         for result in plan.frontmatter.get("gate_results", []):
             if not isinstance(result, dict):
                 continue
             batch = str(result.get("batch", "")).strip()
+            gate_id = str(result.get("gate_id", "")).strip()
+            if not batch:
+                unknown += 1
+                continue
+            latest_results[(batch, gate_id)] = result
+        for (batch, _gate_id), result in sorted(latest_results.items()):
             recorded = str(result.get("input_fingerprint", "")).strip()
             if not batch or not recorded:
                 unknown += 1
