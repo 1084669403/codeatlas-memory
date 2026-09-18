@@ -15,6 +15,8 @@ ZH: 阶段 A（parser.py）把每个文件的原始调用边写入 raw_calls 表
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .storage import Store
 
 
@@ -55,8 +57,8 @@ def _module_prefix(dst_file: str) -> str:
         p = p[: -len("/__init__.py")]
     elif p.endswith(".py"):
         p = p[: -len(".py")]
-    elif p.endswith((".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js")):
-        for ext in (".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js"):
+    elif p.endswith((".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js", ".go")):
+        for ext in (".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js", ".go"):
             if p.endswith(ext):
                 p = p[: -len(ext)]
                 break
@@ -118,6 +120,11 @@ def resolve_callee(
     same_file = [c for c in candidates if qnames.get(c) == src_file]
     if len(same_file) == 1:
         return same_file[0]
+    # prefer same-directory (package) when bare name is ambiguous
+    caller_dir = str(Path(src_file).parent).replace("\\", "/")
+    same_pkg = [c for c in candidates if str(Path(qnames.get(c, "")).parent).replace("\\", "/") == caller_dir]
+    if len(same_pkg) == 1:
+        return same_pkg[0]
     if candidates:
         # ambiguous bare name -> unresolved (documented limitation)
         return None

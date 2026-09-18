@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 21:07
+generated: 2026-09-18 22:21
 language: en
-files: 63
-symbols: 685
-last_scan: 2026-09-18T13:07:16+00:00
+files: 64
+symbols: 697
+last_scan: 2026-09-18T14:21:51+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -120,6 +120,8 @@ graph TD
     d_tests_b61a6d54 --> f_tests_test_budget_py_c3873fcf
     f_ts_test_callgraph_py_5122bd9d["test_callgraph.py"]
     d_tests_b61a6d54 --> f_ts_test_callgraph_py_5122bd9d
+    f_callgraph_quality_py_1db1704e["test_callgraph_quality.py"]
+    d_tests_b61a6d54 --> f_callgraph_quality_py_1db1704e
     f_ts_test_changelog_py_c7f314c2["test_changelog.py"]
     d_tests_b61a6d54 --> f_ts_test_changelog_py_c7f314c2
     f_t_consistency_e2e_py_787988a7["test_consistency_e2e.py"]
@@ -170,7 +172,84 @@ graph TD
 
 ```mermaid
 flowchart LR
-    empty["no internal dependencies"]
+    m_src_codeatlas_cli_py_023008d7["cli.py"]
+    m_las_plan_workflow_py_4b650276["plan_workflow.py"]
+    m_src_codeatlas_cli_py_023008d7 -->|"2"| m_las_plan_workflow_py_4b650276
+    m__codeatlas_memory_py_811979e0["memory.py"]
+    m__codeatlas_budget_py_77d59d5c["budget.py"]
+    m__codeatlas_memory_py_811979e0 -->|"2"| m__codeatlas_budget_py_77d59d5c
+    m_codeatlas_service_py_5a00dc73["service.py"]
+    m_codeatlas_service_py_5a00dc73 -->|"2"| m__codeatlas_memory_py_811979e0
+    m_deatlas_callgraph_py_09387f91["callgraph.py"]
+    m_codeatlas_storage_py_c8346aca["storage.py"]
+    m_deatlas_callgraph_py_09387f91 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_deatlas_changelog_py_7f95a410["changelog.py"]
+    m__codeatlas_models_py_4449037a["models.py"]
+    m_deatlas_changelog_py_7f95a410 -->|"1"| m__codeatlas_models_py_4449037a
+    m_deatlas_changelog_py_7f95a410 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_odeatlas___init___py_b23e50a1["__init__.py"]
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_odeatlas___init___py_b23e50a1
+    m_c_codeatlas_gates_py_9e6ff91d["gates.py"]
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_c_codeatlas_gates_py_9e6ff91d
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m__codeatlas_memory_py_811979e0
+    m_atlas_plan_memory_py_d50fd2bc["plan_memory.py"]
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_atlas_plan_memory_py_d50fd2bc
+    m_c_codeatlas_plans_py_9c9c5ceb["plans.py"]
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_codeatlas_service_py_5a00dc73
+    m_src_codeatlas_cli_py_023008d7 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_atlas_consistency_py_138fcdbe["consistency.py"]
+    m_atlas_consistency_py_138fcdbe -->|"1"| m_deatlas_callgraph_py_09387f91
+    m_atlas_consistency_py_138fcdbe -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_odeatlas_diagrams_py_9af4eb3f["diagrams.py"]
+    m_odeatlas_diagrams_py_9af4eb3f -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_c_codeatlas_gates_py_9e6ff91d -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_codeatlas_indexer_py_1c986101["indexer.py"]
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m_deatlas_callgraph_py_09387f91
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m__codeatlas_models_py_4449037a
+    m__codeatlas_parser_py_25f5e1b0["parser.py"]
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m__codeatlas_parser_py_25f5e1b0
+    m_codeatlas_scanner_py_8b5a09f9["scanner.py"]
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m_codeatlas_scanner_py_8b5a09f9
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_eatlas_summarizer_py_e3f8a862["summarizer.py"]
+    m_codeatlas_indexer_py_1c986101 -->|"1"| m_eatlas_summarizer_py_e3f8a862
+    m_odeatlas_markdown_py_92f67d62["markdown.py"]
+    m_odeatlas_markdown_py_92f67d62 -->|"1"| m_odeatlas_diagrams_py_9af4eb3f
+    m_odeatlas_markdown_py_92f67d62 -->|"1"| m__codeatlas_models_py_4449037a
+    m_odeatlas_markdown_py_92f67d62 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_eatlas_mcp_server_py_af817111["mcp_server.py"]
+    m_eatlas_mcp_server_py_af817111 -->|"1"| m_codeatlas_service_py_5a00dc73
+    m__codeatlas_memory_py_811979e0 -->|"1"| m__codeatlas_models_py_4449037a
+    m__codeatlas_parser_py_25f5e1b0 -->|"1"| m__codeatlas_models_py_4449037a
+    m__codeatlas_parser_py_25f5e1b0 -->|"1"| m_codeatlas_scanner_py_8b5a09f9
+    m_tlas_plan_context_py_0e972a08["plan_context.py"]
+    m_tlas_plan_context_py_0e972a08 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_atlas_plan_impact_py_7db73181["plan_impact.py"]
+    m_atlas_plan_impact_py_7db73181 -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_atlas_plan_impact_py_7db73181 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_atlas_plan_memory_py_d50fd2bc -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_atlas_plan_memory_py_d50fd2bc -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_las_plan_workflow_py_4b650276 -->|"1"| m_atlas_plan_memory_py_d50fd2bc
+    m_las_plan_workflow_py_4b650276 -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_odeatlas_prefetch_py_2cc85f49["prefetch.py"]
+    m_odeatlas_prefetch_py_2cc85f49 -->|"1"| m__codeatlas_budget_py_77d59d5c
+    m_odeatlas_prefetch_py_2cc85f49 -->|"1"| m__codeatlas_memory_py_811979e0
+    m_odeatlas_prefetch_py_2cc85f49 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_deatlas_changelog_py_7f95a410
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_atlas_consistency_py_138fcdbe
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_codeatlas_indexer_py_1c986101
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_odeatlas_markdown_py_92f67d62
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m__codeatlas_models_py_4449037a
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_tlas_plan_context_py_0e972a08
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_atlas_plan_impact_py_7db73181
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_atlas_plan_memory_py_d50fd2bc
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_las_plan_workflow_py_4b650276
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_c_codeatlas_plans_py_9c9c5ceb
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_odeatlas_prefetch_py_2cc85f49
+    m_codeatlas_service_py_5a00dc73 -->|"1"| m_codeatlas_storage_py_c8346aca
+    m_codeatlas_storage_py_c8346aca -->|"1"| m__codeatlas_models_py_4449037a
+    m_eatlas_summarizer_py_e3f8a862 -->|"1"| m__codeatlas_models_py_4449037a
 ```
 
 ### Class Inheritance
@@ -276,6 +355,15 @@ classDiagram
         Summarizer
     }
     note for c_ummarizer_Summarizer_790cd1b2 "extends Protocol"
+    class c_ality_TestGoEndToEnd_0c31bfba {
+        TestGoEndToEnd
+    }
+    class c_y_TestGoModulePrefix_90d237d8 {
+        TestGoModulePrefix
+    }
+    class c_tiveImportResolution_79ca7e84 {
+        TestRelativeImportResolution
+    }
     class c_rdening_TestCIMatrix_f063eef3 {
         TestCIMatrix
     }
@@ -409,33 +497,34 @@ flowchart TD
 | `scripts/probe_parser.py` | python | module | 1 | 0 |
 | `scripts/probe_query_render.py` | python | module | 1 | 0 |
 | `scripts/smoke_test.py` | python | test | 1 | 0 |
-| `src/codeatlas/__init__.py` | python | module | 0 | 0 |
-| `src/codeatlas/budget.py` | python | module | 7 | 0 |
-| `src/codeatlas/callgraph.py` | python | module | 8 | 0 |
-| `src/codeatlas/changelog.py` | python | module | 5 | 0 |
+| `src/codeatlas/__init__.py` | python | module | 0 | 1 |
+| `src/codeatlas/budget.py` | python | module | 7 | 3 |
+| `src/codeatlas/callgraph.py` | python | module | 8 | 2 |
+| `src/codeatlas/changelog.py` | python | module | 5 | 1 |
 | `src/codeatlas/cli.py` | python | entry | 39 | 0 |
-| `src/codeatlas/consistency.py` | python | module | 7 | 0 |
-| `src/codeatlas/diagrams.py` | python | module | 7 | 0 |
-| `src/codeatlas/gates.py` | python | module | 2 | 0 |
-| `src/codeatlas/indexer.py` | python | module | 12 | 0 |
-| `src/codeatlas/markdown.py` | python | module | 6 | 0 |
+| `src/codeatlas/consistency.py` | python | module | 7 | 1 |
+| `src/codeatlas/diagrams.py` | python | module | 7 | 1 |
+| `src/codeatlas/gates.py` | python | module | 2 | 1 |
+| `src/codeatlas/indexer.py` | python | module | 12 | 1 |
+| `src/codeatlas/markdown.py` | python | module | 6 | 1 |
 | `src/codeatlas/mcp_server.py` | python | module | 7 | 0 |
-| `src/codeatlas/memory.py` | python | module | 28 | 0 |
-| `src/codeatlas/models.py` | python | module | 11 | 0 |
-| `src/codeatlas/parser.py` | python | module | 24 | 0 |
-| `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
-| `src/codeatlas/plan_impact.py` | python | module | 10 | 0 |
-| `src/codeatlas/plan_memory.py` | python | module | 13 | 0 |
-| `src/codeatlas/plan_workflow.py` | python | module | 43 | 0 |
-| `src/codeatlas/plans.py` | python | module | 39 | 0 |
-| `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
-| `src/codeatlas/scanner.py` | python | module | 2 | 0 |
-| `src/codeatlas/service.py` | python | module | 22 | 0 |
-| `src/codeatlas/storage.py` | python | module | 50 | 0 |
-| `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
+| `src/codeatlas/memory.py` | python | module | 28 | 4 |
+| `src/codeatlas/models.py` | python | module | 11 | 8 |
+| `src/codeatlas/parser.py` | python | module | 24 | 1 |
+| `src/codeatlas/plan_context.py` | python | module | 9 | 1 |
+| `src/codeatlas/plan_impact.py` | python | module | 10 | 1 |
+| `src/codeatlas/plan_memory.py` | python | module | 13 | 3 |
+| `src/codeatlas/plan_workflow.py` | python | module | 43 | 3 |
+| `src/codeatlas/plans.py` | python | module | 39 | 6 |
+| `src/codeatlas/prefetch.py` | python | module | 5 | 1 |
+| `src/codeatlas/scanner.py` | python | module | 2 | 2 |
+| `src/codeatlas/service.py` | python | module | 22 | 2 |
+| `src/codeatlas/storage.py` | python | module | 50 | 12 |
+| `src/codeatlas/summarizer.py` | python | module | 10 | 1 |
 | `tests/conftest.py` | python | test | 3 | 0 |
 | `tests/test_budget.py` | python | test | 7 | 0 |
 | `tests/test_callgraph.py` | python | test | 9 | 0 |
+| `tests/test_callgraph_quality.py` | python | test | 12 | 0 |
 | `tests/test_changelog.py` | python | test | 11 | 0 |
 | `tests/test_consistency_e2e.py` | python | test | 7 | 0 |
 | `tests/test_context_e2e.py` | python | test | 15 | 0 |
@@ -461,8 +550,8 @@ flowchart TD
 
 ## Recent Changes
 
+- [2026-09-18_2220.md](.codeatlas/history/2026-09-18_2220.md)
+- [2026-09-18_2107.md](.codeatlas/history/2026-09-18_2107.md)
 - [2026-09-18_2102.md](.codeatlas/history/2026-09-18_2102.md)
 - [2026-09-18_2059.md](.codeatlas/history/2026-09-18_2059.md)
 - [2026-09-18_2012.md](.codeatlas/history/2026-09-18_2012.md)
-- [2026-09-18_2008.md](.codeatlas/history/2026-09-18_2008.md)
-- [2026-09-18_1945.md](.codeatlas/history/2026-09-18_1945.md)

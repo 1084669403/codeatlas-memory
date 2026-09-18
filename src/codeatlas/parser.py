@@ -1,4 +1,4 @@
-"""EN: tree-sitter based symbol extraction for Python / JavaScript / TypeScript.
+"""EN: tree-sitter based symbol extraction for Python / JavaScript / TypeScript / Go.
 ZH: 基于 tree-sitter 的 Python / JavaScript / TypeScript 符号提取。
 """
 

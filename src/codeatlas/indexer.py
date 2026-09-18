@@ -232,8 +232,33 @@ def _resolve_imports(record: FileRecord, all_paths: set[str]) -> list[tuple[str,
             continue
         candidates: list[str] = []
         if record.language == "python":
-            base = src.replace(".", "/")
-            candidates = [f"{base}.py", f"{base}/__init__.py"]
+            if src.startswith("."):
+                # EN: Relative import: count leading dots, resolve against the
+                # current file's directory. E.g. from .plans import X in
+                # src/codeatlas/cli.py -> src/codeatlas/plans.py
+                # ZH: 相对导入：计算前导点数，基于当前文件目录解析。
+                level = len(src) - len(src.lstrip("."))
+                module = src[level:]
+                base_dir = Path(record.path).parent.as_posix()
+                for _ in range(level - 1):
+                    base_dir = Path(base_dir).parent.as_posix()
+                if module:
+                    base = f"{base_dir}/{module}"
+                    candidates = [f"{base}.py", f"{base}/__init__.py"]
+                else:
+                    candidates = [f"{base_dir}/__init__.py"]
+                    # EN: `from . import submodule` should resolve to the
+                    # submodule file, not __init__.py, when a matching .py
+                    # exists in the same directory.
+                    # ZH: `from . import 模块` 应解析到同目录下的模块文件。
+                    for name in imp.names:
+                        sub_candidate = f"{base_dir}/{name}.py"
+                        if sub_candidate in path_set:
+                            candidates = [sub_candidate]
+                            break
+            else:
+                base = src.replace(".", "/")
+                candidates = [f"{base}.py", f"{base}/__init__.py"]
         else:
             if src.startswith("."):
                 base_dir = str(Path(record.path).parent)
