@@ -185,11 +185,12 @@ uv sync --extra mcp
 uv run pytest
 ```
 
-CI covers Linux on Python 3.11, 3.12, and 3.13, plus Windows on Python 3.13.
+CI covers Linux on Python 3.11, 3.12, and 3.13, plus Windows and macOS on
+Python 3.13.
 
 ## Known limitations
 
-- Supported languages are Python, JavaScript, and TypeScript/TSX.
+- Supported languages are Python, JavaScript, TypeScript/TSX, and Go.
 - The call graph is approximate. Decorator calls, dynamic dispatch, and
   higher-order callbacks may be missing or attributed approximately.
 - Import resolution is heuristic. Dynamic imports, aliases, and re-exports may
@@ -198,8 +199,6 @@ CI covers Linux on Python 3.11, 3.12, and 3.13, plus Windows on Python 3.13.
   compatible signature shapes.
 - Large `scan_project` or `update_index` calls through MCP may exceed client
   timeouts; prefer the CLI for large repositories.
-- macOS is not covered by the current CI matrix.
-- Windows console output can replace characters that are not printable in GBK.
 - The current release does not include semantic search, Git-aware rollback,
   file watchers, or description enrichment.
 
@@ -211,7 +210,7 @@ CI covers Linux on Python 3.11, 3.12, and 3.13, plus Windows on Python 3.13.
 | Durable plan lifecycle and gate evidence | Done |
 | MCP stdio server | Done |
 | Scoped context VM and short-lived leases | Done |
-| Operational hardening and broader language support | Next |
+| Operational hardening and broader language support | Done |
 | Semantic search, rollback, watchers, and enrichment | Later, not started |
 
 ## License

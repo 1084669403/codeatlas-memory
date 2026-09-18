@@ -181,18 +181,16 @@ uv sync --extra mcp
 uv run pytest
 ```
 
-CI 覆盖 Linux 上的 Python 3.11、3.12、3.13，以及 Windows 上的 Python 3.13。
+CI 覆盖 Linux 上的 Python 3.11、3.12、3.13，以及 Windows 和 macOS 上的 Python 3.13。
 
 ## 已知限制
 
-- 当前支持 Python、JavaScript、TypeScript/TSX。
+- 当前支持 Python、JavaScript、TypeScript/TSX 和 Go。
 - 调用图是近似结果。装饰器调用、动态分派和高阶回调可能缺失或被近似归因。
 - 导入解析是启发式的。动态导入、别名和重导出可能被遗漏。
 - 重命名检测是启发式的，基于同文件的新增/删除符号对和兼容的签名形状。
 - 在大型仓库中，MCP 的 `scan_project` 或 `update_index` 可能超过客户端超时；
   建议改用 CLI。
-- 当前 CI 矩阵未覆盖 macOS。
-- Windows 控制台可能替换 GBK 下不可打印的字符。
 - 当前版本不包含语义搜索、Git 感知回滚、文件监听器或描述增强。
 
 ## 路线图
@@ -203,7 +201,7 @@ CI 覆盖 Linux 上的 Python 3.11、3.12、3.13，以及 Windows 上的 Python 
 | 持久计划生命周期和质量门证据 | 完成 |
 | MCP stdio 服务器 | 完成 |
 | 有作用域的上下文虚拟内存和短租约 | 完成 |
-| 运维加固和更多语言支持 | 下一步 |
+| 运维加固和更多语言支持 | 完成 |
 | 语义搜索、回滚、监听器和描述增强 | 后续，尚未开始 |
 
 ## 许可证

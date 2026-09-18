@@ -14,6 +14,7 @@ Commands:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import typer
@@ -42,6 +43,24 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+def _safe_console_encoding() -> None:
+    """Ensure stdout/stderr do not raise UnicodeEncodeError on non-UTF-8 codepages.
+
+    On Windows with legacy codepages (e.g. GBK/cp936), piping rich output can
+    raise UnicodeEncodeError for characters outside the codepage.  Setting
+    errors="replace" degrades gracefully to '?' instead of crashing.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="replace")
+            except (OSError, ValueError, AttributeError):
+                pass
+
+
+_safe_console_encoding()
 console = Console()
 err_console = Console(stderr=True)
 

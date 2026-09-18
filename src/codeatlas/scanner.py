@@ -19,6 +19,7 @@ EXTENSION_TO_LANGUAGE: dict[str, str] = {
     ".jsx": "javascript",
     ".ts": "typescript",
     ".tsx": "typescript",
+    ".go": "go",
 }
 
 # EN: Directories always excluded, independent of .gitignore.

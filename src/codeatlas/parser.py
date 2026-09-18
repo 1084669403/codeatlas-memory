@@ -31,6 +31,12 @@ JS_SYMBOL_NODES = {
     "variable_declarator": SymbolKind.FUNCTION,
 }
 
+GO_SYMBOL_NODES = {
+    "function_declaration": SymbolKind.FUNCTION,
+    "method_declaration": SymbolKind.METHOD,
+    "type_spec": SymbolKind.CLASS,  # struct_type -> CLASS, interface_type -> INTERFACE
+}
+
 TS_METHOD_NODES = {
     "method_definition": SymbolKind.METHOD,
     "public_field_definition": SymbolKind.METHOD,
@@ -621,6 +627,163 @@ def _js_symbols(rel_posix: str, source: bytes, root) -> tuple[list[Symbol], list
     return symbols, calls
 
 
+
+
+def _parse_go_signature(node) -> tuple[str, str, str]:
+    """Extract signature, params, and returns from a Go function or method declaration."""
+    name_node = node.child_by_field_name("name")
+    params_node = node.child_by_field_name("parameters")
+    result_node = node.child_by_field_name("result")
+    params = _flatten(_text(params_node)).strip() if params_node else "()"
+    returns = _flatten(_text(result_node)).strip() if result_node else ""
+    name = _text(name_node) if name_node else "<anonymous>"
+    if node.type == "method_declaration":
+        receiver = node.child_by_field_name("receiver")
+        recv_text = _flatten(_text(receiver)).strip() if receiver else ""
+        sig = f"func ({recv_text}) {name}{params}"
+    else:
+        sig = f"func {name}{params}"
+    if returns:
+        sig += f" {returns}"
+    return sig, params, returns
+
+
+def _extract_go_imports(root) -> list[Import]:
+    """Extract import declarations from a Go AST."""
+    imports: list[Import] = []
+
+    def visit(node) -> None:
+        if node.type == "import_declaration":
+            for sub in node.children:
+                if sub.type == "import_spec_list":
+                    for spec in sub.children:
+                        if spec.type == "import_spec":
+                            raw = _text(spec).strip().strip('"')
+                            if raw:
+                                imports.append(Import(source=raw, names=[]))
+                elif sub.type == "import_spec":
+                    raw = _text(sub).strip().strip('"')
+                    if raw:
+                        imports.append(Import(source=raw, names=[]))
+            return
+        for child in node.children:
+            visit(child)
+
+    visit(root)
+    return imports
+
+
+def _go_calls_in_body(src_qname: str, body_node) -> list[CallEdge]:
+    """Extract call edges from a Go function or method body."""
+    calls: list[CallEdge] = []
+    if body_node is None:
+        return calls
+
+    def walk(node) -> None:
+        if node.type == "call_expression":
+            fn = node.child_by_field_name("function")
+            if fn is not None:
+                callee = _flatten(_text(fn)).strip()
+                if callee:
+                    calls.append(CallEdge(src_qname=src_qname, callee_raw=callee, line=node.start_point[0] + 1))
+        for child in node.children:
+            walk(child)
+
+    walk(body_node)
+    return calls
+
+
+def _go_symbols(rel_posix: str, source: bytes, root) -> tuple[list[Symbol], list[CallEdge]]:
+    """Extract symbols from a Go AST (functions, methods, structs, interfaces)."""
+    symbols: list[Symbol] = []
+    calls: list[CallEdge] = []
+    module = rel_posix.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+
+    def _preceding_comment(children: list, index: int) -> str:
+        doc_lines: list[str] = []
+        j = index - 1
+        while j >= 0 and children[j].type == "comment":
+            text = _text(children[j]).strip()
+            if text.startswith("//"):
+                doc_lines.insert(0, text.removeprefix("//").strip())
+            j -= 1
+        return " ".join(doc_lines)
+
+    def visit(node) -> None:
+        for i, child in enumerate(node.children):
+            t = child.type
+            if t == "function_declaration":
+                sig, params, returns = _parse_go_signature(child)
+                name_node = child.child_by_field_name("name")
+                name = _text(name_node) if name_node else "<anonymous>"
+                qual = f"{module}.{name}"
+                body_node = child.child_by_field_name("body")
+                symbols.append(Symbol(
+                    qualified_name=qual, name=name, kind=SymbolKind.FUNCTION,
+                    signature=sig, params=params, returns=returns,
+                    docstring=_preceding_comment(node.children, i),
+                    line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
+                    language="go", body=_body_text(body_node),
+                ))
+                calls.extend(_go_calls_in_body(qual, body_node))
+            elif t == "method_declaration":
+                sig, params, returns = _parse_go_signature(child)
+                name_node = child.child_by_field_name("name")
+                name = _text(name_node) if name_node else "<anonymous>"
+                receiver = child.child_by_field_name("receiver")
+                recv_type = ""
+                if receiver is not None:
+                    for sub in receiver.children:
+                        if sub.type == "parameter_declaration":
+                            type_node = sub.child_by_field_name("type")
+                            if type_node is not None:
+                                recv_type = _flatten(_text(type_node)).strip().lstrip("*")
+                                break
+                qual = f"{module}.{recv_type}.{name}" if recv_type else f"{module}.{name}"
+                body_node = child.child_by_field_name("body")
+                symbols.append(Symbol(
+                    qualified_name=qual, name=name, kind=SymbolKind.METHOD,
+                    signature=sig, params=params, returns=returns,
+                    docstring=_preceding_comment(node.children, i),
+                    line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
+                    language="go", body=_body_text(body_node),
+                ))
+                calls.extend(_go_calls_in_body(qual, body_node))
+            elif t == "type_declaration":
+                for spec in child.children:
+                    if spec.type != "type_spec":
+                        continue
+                    name_node = spec.child_by_field_name("name")
+                    type_node = spec.child_by_field_name("type")
+                    if name_node is None:
+                        continue
+                    name = _text(name_node)
+                    qual = f"{module}.{name}"
+                    is_interface = type_node is not None and type_node.type == "interface_type"
+                    kind = SymbolKind.INTERFACE if is_interface else SymbolKind.CLASS
+                    bases: list[str] = []
+                    if is_interface and type_node is not None:
+                        for sub in type_node.children:
+                            if sub.type == "method_elem":
+                                mn = sub.child_by_field_name("name")
+                                if mn is not None:
+                                    bases.append(_text(mn))
+                    type_text = _flatten(_text(type_node)).strip() if type_node is not None else ""
+                    symbols.append(Symbol(
+                        qualified_name=qual, name=name, kind=kind,
+                        signature=f"type {name} {type_text}" if type_text else f"type {name}",
+                        params="", returns="",
+                        docstring=_preceding_comment(node.children, i),
+                        bases=bases,
+                        line=spec.start_point[0] + 1, end_line=spec.end_point[0] + 1,
+                        language="go",
+                    ))
+            elif t not in ("comment", "import_declaration", "var_declaration"):
+                visit(child)
+
+    visit(root)
+    return symbols, calls
+
 def parse_file(root: Path, file_path: Path) -> FileRecord:
     """Parse one file into a FileRecord (symbols + imports + hash).
 
@@ -645,6 +808,9 @@ def parse_file(root: Path, file_path: Path) -> FileRecord:
     if language == "python":
         symbols, calls = _python_symbols(rel_posix, source, tree.root_node)
         imports = _extract_py_imports(tree.root_node)
+    elif language == "go":
+        symbols, calls = _go_symbols(rel_posix, source, tree.root_node)
+        imports = _extract_go_imports(tree.root_node)
     else:
         symbols, calls = _js_symbols(rel_posix, source, tree.root_node)
         imports = _extract_js_imports(tree.root_node)

@@ -28,6 +28,9 @@ jobs:
           # Windows runner: GBK console / path issues only surface there.
           - os: windows-latest
             python-version: "3.13"
+          # macOS runner: Apple Silicon compatibility and tree-sitter native builds.
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 

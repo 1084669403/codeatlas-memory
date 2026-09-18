@@ -137,6 +137,8 @@ class Plan:
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+    # Strip leading date prefix (YYYY-MM-DD-) to prevent double-dated plan IDs.
+    slug = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", slug)
     return slug or "plan"
 
 
