@@ -33,6 +33,39 @@ def test_python_magic_and_roles(sample_project: Path) -> None:
     assert any(s.name == "main" for s in rec.symbols)
 
 
+def test_python_decorated_definitions_are_symbols(tmp_path: Path) -> None:
+    module = tmp_path / "decorated.py"
+    module.write_text(
+        "from dataclasses import dataclass\n"
+        "\n"
+        "def register(name):\n"
+        "    def wrapper(target):\n"
+        "        return target\n"
+        "    return wrapper\n"
+        "\n"
+        "@register('command')\n"
+        "def command() -> str:\n"
+        "    '''Run a command.'''\n"
+        "    return 'ok'\n"
+        "\n"
+        "@dataclass\n"
+        "class Config:\n"
+        "    name: str\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def default() -> 'Config':\n"
+        "        return Config('default')\n",
+        encoding="utf-8",
+    )
+
+    rec = parse_file(tmp_path, module)
+    names = {symbol.qualified_name for symbol in rec.symbols}
+
+    assert "decorated.command" in names
+    assert "decorated.Config" in names
+    assert "decorated.Config.default" in names
+
+
 def test_typescript_symbols(sample_project: Path) -> None:
     rec = parse_file(sample_project, sample_project / "src" / "index.ts")
     assert rec.language == "typescript"

@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 16:17
+generated: 2026-09-18 16:34
 language: en
 files: 61
-symbols: 594
-last_scan: 2026-09-18T08:17:22+00:00
+symbols: 652
+last_scan: 2026-09-18T08:34:17+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -191,29 +191,77 @@ classDiagram
     class c_task_panel_TaskPanel_e1172c04 {
         TaskPanel
     }
+    class c_eatlas_budget_Budget_778164af {
+        Budget
+    }
+    class c__budget_BudgetReport_cb5191a7 {
+        BudgetReport
+    }
     class c_mory_AmbiguousSymbol_386b8d46 {
         AmbiguousSymbol
     }
     note for c_mory_AmbiguousSymbol_386b8d46 "extends Exception"
+    class c_as_memory_PageStatus_13e691cf {
+        PageStatus
+    }
+    class c_tlas_models_CallEdge_6a837e8b {
+        CallEdge
+    }
+    class c__models_ChangeRecord_c82215e3 {
+        ChangeRecord
+    }
     class c_as_models_ChangeType_17480da7 {
         ChangeType
     }
     note for c_as_models_ChangeType_17480da7 "extends str"
     note for c_as_models_ChangeType_17480da7 "extends Enum"
+    class c_as_models_FileRecord_cb229562 {
+        FileRecord
+    }
+    class c_eatlas_models_Import_1e0809f4 {
+        Import
+    }
+    class c_odeatlas_models_Page_b9388fa2 {
+        Page
+    }
     class c_odeatlas_models_Role_c5d68e68 {
         Role
     }
     note for c_odeatlas_models_Role_c5d68e68 "extends str"
     note for c_odeatlas_models_Role_c5d68e68 "extends Enum"
+    class c_as_models_ScanResult_1dfd0ce1 {
+        ScanResult
+    }
+    class c_eatlas_models_Symbol_610745b6 {
+        Symbol
+    }
     class c_as_models_SymbolKind_8d37c271 {
         SymbolKind
     }
     note for c_as_models_SymbolKind_8d37c271 "extends str"
     note for c_as_models_SymbolKind_8d37c271 "extends Enum"
+    class c_dels_WorkingSetEntry_c4d835bc {
+        WorkingSetEntry
+    }
+    class c_kflow_WorkflowResult_9b0ade38 {
+        WorkflowResult
+    }
+    class c_tlas_plans_LintIssue_5e1851d0 {
+        LintIssue
+    }
+    class c_codeatlas_plans_Plan_afaa4009 {
+        Plan
+    }
     class c_tlas_plans_PlanError_f4f5a73e {
         PlanError
     }
     note for c_tlas_plans_PlanError_f4f5a73e "extends Exception"
+    class c_e_ContextLoadOutcome_2ec17c3b {
+        ContextLoadOutcome
+    }
+    class c_ervice_UpdateOutcome_b6cf9c76 {
+        UpdateOutcome
+    }
     class c_eatlas_storage_Store_1fe73e2a {
         Store
     }
@@ -253,6 +301,9 @@ flowchart TD
     cg_s__validate_workflow_986ada7d -->|"7"| cg_deatlas_plans__issue_afc19aa4
     cg_s_prefetch_neighbors_69a0aae7["neighbors"]
     cg_s_prefetch_neighbors_69a0aae7 -->|"6"| cg__panel_TaskPanel_add_1290b4de
+    cg_dexer_detect_renames_5fdb88f6["detect_renames"]
+    cg_eatlas_plans_Plan_id_dfac6b4d["id"]
+    cg_dexer_detect_renames_5fdb88f6 -->|"5"| cg_eatlas_plans_Plan_id_dfac6b4d
     cg_passing_gate_results_1f1f170a["_require_passing_gate_results"]
     cg_passing_gate_results_1f1f170a -->|"5"| cg_tlas_plans_PlanError_f4f5a73e
     cg_kflow_reapprove_plan_33be02e8["reapprove_plan"]
@@ -260,6 +311,9 @@ flowchart TD
     cg_grams_directory_tree_edc90507["directory_tree"]
     cg_as_diagrams__node_id_c401dc4d["_node_id"]
     cg_grams_directory_tree_edc90507 -->|"4"| cg_as_diagrams__node_id_c401dc4d
+    cg_er_diff_file_symbols_df6a123d["diff_file_symbols"]
+    cg__models_ChangeRecord_c82215e3["ChangeRecord"]
+    cg_er_diff_file_symbols_df6a123d -->|"4"| cg__models_ChangeRecord_c82215e3
     cg___parse_js_signature_7af9866c["_parse_js_signature"]
     cg_deatlas_parser__text_d1d34230["_text"]
     cg___parse_js_signature_7af9866c -->|"4"| cg_deatlas_parser__text_d1d34230
@@ -321,11 +375,6 @@ flowchart TD
     cg_tch_recency_discount_16f3cb09["test_prefetch_recency_discount"]
     cg_udget_eviction_score_e3997300["eviction_score"]
     cg_tch_recency_discount_16f3cb09 -->|"3"| cg_udget_eviction_score_e3997300
-    cg_cycle_and_invariants_12cdbc1e["test_full_lifecycle_and_invaria…"]
-    cg_tency_check_fts_sync_414a03e5["check_fts_sync"]
-    cg_cycle_and_invariants_12cdbc1e -->|"3"| cg_tency_check_fts_sync_414a03e5
-    cg__check_refs_dangling_0565b695["check_refs_dangling"]
-    cg_cycle_and_invariants_12cdbc1e -->|"3"| cg__check_refs_dangling_0565b695
     more_40["… 40+ edges (see call_edges table)"]
 ```
 
@@ -348,30 +397,30 @@ flowchart TD
 | `scripts/probe_query_render.py` | python | module | 1 | 0 |
 | `scripts/smoke_test.py` | python | test | 1 | 0 |
 | `src/codeatlas/__init__.py` | python | module | 0 | 0 |
-| `src/codeatlas/budget.py` | python | module | 5 | 0 |
+| `src/codeatlas/budget.py` | python | module | 7 | 0 |
 | `src/codeatlas/callgraph.py` | python | module | 8 | 0 |
 | `src/codeatlas/changelog.py` | python | module | 5 | 0 |
-| `src/codeatlas/cli.py` | python | entry | 8 | 0 |
+| `src/codeatlas/cli.py` | python | entry | 38 | 0 |
 | `src/codeatlas/consistency.py` | python | module | 7 | 0 |
 | `src/codeatlas/diagrams.py` | python | module | 7 | 0 |
 | `src/codeatlas/gates.py` | python | module | 2 | 0 |
 | `src/codeatlas/indexer.py` | python | module | 12 | 0 |
 | `src/codeatlas/markdown.py` | python | module | 6 | 0 |
 | `src/codeatlas/mcp_server.py` | python | module | 7 | 0 |
-| `src/codeatlas/memory.py` | python | module | 27 | 0 |
-| `src/codeatlas/models.py` | python | module | 3 | 0 |
-| `src/codeatlas/parser.py` | python | module | 19 | 0 |
+| `src/codeatlas/memory.py` | python | module | 28 | 0 |
+| `src/codeatlas/models.py` | python | module | 11 | 0 |
+| `src/codeatlas/parser.py` | python | module | 20 | 0 |
 | `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
 | `src/codeatlas/plan_impact.py` | python | module | 10 | 0 |
 | `src/codeatlas/plan_memory.py` | python | module | 13 | 0 |
-| `src/codeatlas/plan_workflow.py` | python | module | 42 | 0 |
-| `src/codeatlas/plans.py` | python | module | 34 | 0 |
+| `src/codeatlas/plan_workflow.py` | python | module | 43 | 0 |
+| `src/codeatlas/plans.py` | python | module | 39 | 0 |
 | `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
 | `src/codeatlas/scanner.py` | python | module | 2 | 0 |
-| `src/codeatlas/service.py` | python | module | 20 | 0 |
-| `src/codeatlas/storage.py` | python | module | 49 | 0 |
+| `src/codeatlas/service.py` | python | module | 22 | 0 |
+| `src/codeatlas/storage.py` | python | module | 50 | 0 |
 | `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
-| `tests/conftest.py` | python | test | 0 | 0 |
+| `tests/conftest.py` | python | test | 3 | 0 |
 | `tests/test_budget.py` | python | test | 7 | 0 |
 | `tests/test_callgraph.py` | python | test | 9 | 0 |
 | `tests/test_changelog.py` | python | test | 11 | 0 |
@@ -381,13 +430,13 @@ flowchart TD
 | `tests/test_execution_quality.py` | python | test | 16 | 0 |
 | `tests/test_indexer.py` | python | test | 9 | 0 |
 | `tests/test_markdown.py` | python | test | 6 | 0 |
-| `tests/test_mcp_server.py` | python | test | 26 | 0 |
+| `tests/test_mcp_server.py` | python | test | 27 | 0 |
 | `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_memory_graph.py` | python | test | 9 | 0 |
-| `tests/test_parser.py` | python | test | 6 | 0 |
+| `tests/test_parser.py` | python | test | 7 | 0 |
 | `tests/test_phase3_plan_impact.py` | python | test | 27 | 0 |
-| `tests/test_plan_context.py` | python | test | 6 | 0 |
-| `tests/test_plan_engine.py` | python | test | 16 | 0 |
+| `tests/test_plan_context.py` | python | test | 7 | 0 |
+| `tests/test_plan_engine.py` | python | test | 17 | 0 |
 | `tests/test_plan_workflow.py` | python | test | 18 | 0 |
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
@@ -397,8 +446,8 @@ flowchart TD
 
 ## Recent Changes
 
+- [2026-09-18_1617.md](.codeatlas/history/2026-09-18_1617.md)
 - [2026-09-18_1614.md](.codeatlas/history/2026-09-18_1614.md)
 - [2026-09-18_1547.md](.codeatlas/history/2026-09-18_1547.md)
 - [2026-09-18_1543.md](.codeatlas/history/2026-09-18_1543.md)
 - [2026-09-18_1541.md](.codeatlas/history/2026-09-18_1541.md)
-- [2026-09-18_1533.md](.codeatlas/history/2026-09-18_1533.md)

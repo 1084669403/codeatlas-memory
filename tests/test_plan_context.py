@@ -8,7 +8,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from codeatlas.cli import app
+from codeatlas.plan_memory import plan_doctor_warnings
 from codeatlas.plan_context import retrieve_plan_context
+from codeatlas.plan_workflow import create_plan
 from codeatlas.service import scan_project
 from codeatlas.mcp_server import build_server
 
@@ -117,3 +119,19 @@ async def test_mcp_plan_context(sample_project: Path) -> None:
     parsed = json.loads(result.content[0].text)
     assert parsed["status"] == "ok"
     assert parsed["evidence"]
+
+
+def test_doctor_unresolved_symbols_scope_to_active_plans(sample_project: Path) -> None:
+    scan_project(sample_project)
+    plans_dir = sample_project / "docs" / "plans"
+    for plan_id, status in (("active-plan", "approved"), ("done-plan", "done")):
+        created = create_plan(sample_project, plans_dir, slug=plan_id)
+        text = created.plan.path.read_text(encoding="utf-8")
+        text = text.replace("status: draft", f"status: {status}", 1)
+        text = text.replace("symbols: []", "symbols:\n  - does.not.exist", 1)
+        created.plan.path.write_text(text, encoding="utf-8", newline="\n")
+
+    warnings = plan_doctor_warnings(sample_project, plans_dir)
+
+    assert any("active-plan: does.not.exist" in warning for warning in warnings)
+    assert not any("done-plan: does.not.exist" in warning for warning in warnings)

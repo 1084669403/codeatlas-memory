@@ -298,7 +298,12 @@ def plan_doctor_problems(root: str | Path, plans_dir: str | Path) -> list[str]:
 
 
 def plan_doctor_warnings(root: str | Path, plans_dir: str | Path) -> list[str]:
-    """Return non-fatal warnings for legacy Markdown files kept beside plans."""
+    """Return active-plan and legacy-file warnings for doctor.
+
+    EN: historical plan evidence remains on disk but does not create a current
+    unresolved-symbol signal. ZH: 历史计划证据保留在磁盘上，但不再生成当前
+    的 unresolved-symbol 噪声。
+    """
     root_path = Path(root).resolve()
     directory = Path(plans_dir)
     if not directory.is_absolute():
@@ -314,6 +319,8 @@ def plan_doctor_warnings(root: str | Path, plans_dir: str | Path) -> list[str]:
             except PlanError:
                 pass
             else:
+                if plan.status not in ACTIVE_PLAN_STATUSES:
+                    continue
                 referenced_symbols = {
                     str(ref).strip()
                     for ref in plan.frontmatter.get("symbols", [])

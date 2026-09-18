@@ -380,6 +380,18 @@ def _python_symbols(rel_posix: str, source: bytes, root) -> list[Symbol]:
 
     def visit(node, class_prefix: str, parent_siblings=None):
         for i, child in enumerate(node.children):
+            if child.type == "decorated_definition":
+                definition = next(
+                    (
+                        item
+                        for item in child.named_children
+                        if item.type in ("function_definition", "class_definition")
+                    ),
+                    None,
+                )
+                if definition is not None:
+                    visit(child, class_prefix)
+                continue
             if child.type == "function_definition":
                 sig, params, returns = _parse_py_signature(child)
                 name = _text(child.child_by_field_name("name"))
