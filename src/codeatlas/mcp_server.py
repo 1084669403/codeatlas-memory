@@ -131,10 +131,18 @@ def build_server():
             outcome = service.update_project(r, "en")
             res = outcome.result
             note = " (no index yet — full scan ran instead)" if outcome.fell_back else ""
-            return (
+            message = (
                 f"Updated: {res.files_parsed} file(s) re-parsed, "
                 f"{res.files_skipped} skipped, {len(res.changes)} symbol change(s).{note}"
             )
+            affected = (outcome.impact_report or {}).get("affected_plans", [])
+            if affected:
+                rendered = ", ".join(
+                    f"{plan['plan_id']} ({', '.join(plan['affected_batches'])})"
+                    for plan in affected
+                )
+                message += f" Affected plans: {rendered}."
+            return message
         except FileNotFoundError as e:
             return str(e)
 

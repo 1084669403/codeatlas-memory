@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .plans import Plan, PlanError, is_plan_file, lint_plans, parse_plan, plan_graph
+from .storage import Store
 
 
 def _sha256_json(value: Any) -> str:
@@ -53,6 +54,20 @@ def _referenced_paths(plan: Plan, batch: str) -> set[str]:
             for value in test.get("files", []):
                 paths.add(str(value).split("::", 1)[0])
     return paths
+
+
+def _known_symbols(root: Path) -> set[str] | None:
+    """Return indexed qualified names and module paths, or None if unindexed."""
+    db = root / ".codeatlas" / "state.db"
+    if not db.is_file():
+        return None
+    store = Store(db)
+    try:
+        references = {str(row[1]) for row in store.all_symbols()}
+        references.update(str(path) for path in store.known_paths())
+        return references
+    finally:
+        store.close()
 
 
 def _referenced_symbols(plan: Plan, batch: str) -> list[str]:
@@ -234,7 +249,39 @@ def plan_doctor_warnings(root: str | Path, plans_dir: str | Path) -> list[str]:
     if not directory.is_dir():
         return []
     warnings: list[str] = []
+    known_symbols = _known_symbols(root_path)
     for path in sorted(directory.glob("*.md")):
+        if known_symbols is not None and is_plan_file(path):
+            try:
+                plan = parse_plan(path, root=root_path)
+            except PlanError:
+                pass
+            else:
+                referenced_symbols = {
+                    str(ref).strip()
+                    for ref in plan.frontmatter.get("symbols", [])
+                    if str(ref).strip()
+                }
+                for task in plan.tasks:
+                    referenced_symbols.update(
+                        str(ref).strip() for ref in task.get("symbols", []) if str(ref).strip()
+                    )
+                for ref in sorted(referenced_symbols):
+                    dotted_path = ref.replace(".", "/")
+                    suffixes = {f"/{dotted_path}.py", f"/{dotted_path}/__init__.py"}
+                    resolves = ref in known_symbols or any(
+                        path_str == f"{dotted_path}.py"
+                        or path_str == f"{dotted_path}/__init__.py"
+                        or path_str.endswith(tuple(suffixes))
+                        for path_str in known_symbols
+                        if "/" in path_str
+                    ) or any(
+                        qualified.endswith(f".{ref}")
+                        for qualified in known_symbols
+                        if "/" not in qualified
+                    )
+                    if not resolves:
+                        warnings.append(f"plan unresolved symbol: {plan.id}: {ref}")
         if not is_plan_file(path):
             relative = path.relative_to(root_path).as_posix()
             warnings.append(f"non-plan markdown retained in plans directory: {relative}")

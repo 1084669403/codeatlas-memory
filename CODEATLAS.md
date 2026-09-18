@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-17 19:30
+generated: 2026-09-18 09:32
 language: en
-files: 59
-symbols: 530
-last_scan: 2026-09-17T11:30:28+00:00
+files: 61
+symbols: 563
+last_scan: 2026-09-18T01:32:23+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -94,6 +94,8 @@ graph TD
     d_src_codeatlas_9b8859fc --> f__codeatlas_parser_py_25f5e1b0
     f_tlas_plan_context_py_0e972a08["plan_context.py"]
     d_src_codeatlas_9b8859fc --> f_tlas_plan_context_py_0e972a08
+    f_atlas_plan_impact_py_7db73181["plan_impact.py"]
+    d_src_codeatlas_9b8859fc --> f_atlas_plan_impact_py_7db73181
     f_atlas_plan_memory_py_d50fd2bc["plan_memory.py"]
     d_src_codeatlas_9b8859fc --> f_atlas_plan_memory_py_d50fd2bc
     f_las_plan_workflow_py_4b650276["plan_workflow.py"]
@@ -140,6 +142,8 @@ graph TD
     d_tests_b61a6d54 --> f_test_memory_graph_py_e98c680d
     f_tests_test_parser_py_ed9d6689["test_parser.py"]
     d_tests_b61a6d54 --> f_tests_test_parser_py_ed9d6689
+    f_hase3_plan_impact_py_2b3cec88["test_phase3_plan_impact.py"]
+    d_tests_b61a6d54 --> f_hase3_plan_impact_py_2b3cec88
     f_test_plan_context_py_08072798["test_plan_context.py"]
     d_tests_b61a6d54 --> f_test_plan_context_py_08072798
     f__test_plan_engine_py_7d5efd3d["test_plan_engine.py"]
@@ -235,6 +239,9 @@ flowchart TD
     cg_ripts_probe_cli_main_56c37b22 -->|"9"| cg_cripts_probe_cli_run_b3a806d7
     cg_ate_testing_contract_f0709078["_validate_testing_contract"]
     cg_ate_testing_contract_f0709078 -->|"9"| cg_deatlas_plans__issue_afc19aa4
+    cg__compute_plan_impact_c4444998["compute_plan_impact"]
+    cg__panel_TaskPanel_add_1290b4de["add"]
+    cg__compute_plan_impact_c4444998 -->|"7"| cg__panel_TaskPanel_add_1290b4de
     cg_w_record_gate_result_600fdd77["record_gate_result"]
     cg_tlas_plans_PlanError_f4f5a73e["PlanError"]
     cg_w_record_gate_result_600fdd77 -->|"7"| cg_tlas_plans_PlanError_f4f5a73e
@@ -245,7 +252,6 @@ flowchart TD
     cg_s__validate_workflow_986ada7d["_validate_workflow"]
     cg_s__validate_workflow_986ada7d -->|"7"| cg_deatlas_plans__issue_afc19aa4
     cg_s_prefetch_neighbors_69a0aae7["neighbors"]
-    cg__panel_TaskPanel_add_1290b4de["add"]
     cg_s_prefetch_neighbors_69a0aae7 -->|"6"| cg__panel_TaskPanel_add_1290b4de
     cg_passing_gate_results_1f1f170a["_require_passing_gate_results"]
     cg_passing_gate_results_1f1f170a -->|"5"| cg_tlas_plans_PlanError_f4f5a73e
@@ -259,6 +265,8 @@ flowchart TD
     cg___parse_js_signature_7af9866c -->|"4"| cg_deatlas_parser__text_d1d34230
     cg_orkflow_approve_plan_1ada20cd["approve_plan"]
     cg_orkflow_approve_plan_1ada20cd -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
+    cg_orkflow_reopen_batch_438f13f7["reopen_batch"]
+    cg_orkflow_reopen_batch_438f13f7 -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
     cg_s__split_frontmatter_850d4d39["_split_frontmatter"]
     cg_s__split_frontmatter_850d4d39 -->|"4"| cg_tlas_plans_PlanError_f4f5a73e
     cg__validate_references_53f31e1b["_validate_references"]
@@ -293,6 +301,8 @@ flowchart TD
     cg_etrieve_plan_context_5d8219b7["retrieve_plan_context"]
     cg_n_context__bootstrap_5872fd6f["_bootstrap"]
     cg_etrieve_plan_context_5d8219b7 -->|"3"| cg_n_context__bootstrap_5872fd6f
+    cg___symbol_source_path_5bda0d6d["_symbol_source_path"]
+    cg__compute_plan_impact_c4444998 -->|"3"| cg___symbol_source_path_5bda0d6d
     cg_uire_execution_ready_29a66b82["_require_execution_ready"]
     cg_uire_execution_ready_29a66b82 -->|"3"| cg_tlas_plans_PlanError_f4f5a73e
     cg_low_mark_batch_stale_c3094ea2["mark_batch_stale"]
@@ -316,14 +326,6 @@ flowchart TD
     cg_cycle_and_invariants_12cdbc1e -->|"3"| cg__check_refs_dangling_0565b695
     cg_trips_breaking_chars_eaacf045["test_clean_strips_breaking_chars"]
     cg_trips_breaking_chars_eaacf045 -->|"3"| cg_tlas_diagrams__clean_6b5d9662
-    cg_overview_update_flow_be50eba7["test_mcp_scan_overview_update_f…"]
-    cg_est_mcp_server__call_4a0a672c["_call"]
-    cg_overview_update_flow_be50eba7 -->|"3"| cg_est_mcp_server__call_4a0a672c
-    cg__evict_pin_semantics_08f7db71["test_service_evict_pin_semantics"]
-    cg__service_evict_pages_e456fa8a["evict_pages"]
-    cg__evict_pin_semantics_08f7db71 -->|"3"| cg__service_evict_pages_e456fa8a
-    cg_detection_and_render_113d3e46["test_file_page_detection_and_re…"]
-    cg_detection_and_render_113d3e46 -->|"3"| cg_memory__is_file_page_a9c1e0f6
     more_40["… 40+ edges (see call_edges table)"]
 ```
 
@@ -360,12 +362,13 @@ flowchart TD
 | `src/codeatlas/models.py` | python | module | 3 | 0 |
 | `src/codeatlas/parser.py` | python | module | 19 | 0 |
 | `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
-| `src/codeatlas/plan_memory.py` | python | module | 11 | 0 |
-| `src/codeatlas/plan_workflow.py` | python | module | 40 | 0 |
+| `src/codeatlas/plan_impact.py` | python | module | 10 | 0 |
+| `src/codeatlas/plan_memory.py` | python | module | 12 | 0 |
+| `src/codeatlas/plan_workflow.py` | python | module | 41 | 0 |
 | `src/codeatlas/plans.py` | python | module | 34 | 0 |
 | `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
 | `src/codeatlas/scanner.py` | python | module | 2 | 0 |
-| `src/codeatlas/service.py` | python | module | 17 | 0 |
+| `src/codeatlas/service.py` | python | module | 18 | 0 |
 | `src/codeatlas/storage.py` | python | module | 46 | 0 |
 | `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
 | `tests/conftest.py` | python | test | 0 | 0 |
@@ -382,9 +385,10 @@ flowchart TD
 | `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_memory_graph.py` | python | test | 9 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
+| `tests/test_phase3_plan_impact.py` | python | test | 14 | 0 |
 | `tests/test_plan_context.py` | python | test | 6 | 0 |
 | `tests/test_plan_engine.py` | python | test | 16 | 0 |
-| `tests/test_plan_workflow.py` | python | test | 12 | 0 |
+| `tests/test_plan_workflow.py` | python | test | 18 | 0 |
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
 | `tests/test_scanner.py` | python | test | 5 | 0 |
@@ -393,8 +397,8 @@ flowchart TD
 
 ## Recent Changes
 
-- [2026-09-17_1926.md](.codeatlas/history/2026-09-17_1926.md)
-- [2026-09-17_1844.md](.codeatlas/history/2026-09-17_1844.md)
-- [2026-09-17_1822.md](.codeatlas/history/2026-09-17_1822.md)
-- [2026-09-17_1810.md](.codeatlas/history/2026-09-17_1810.md)
-- [2026-09-17_1809.md](.codeatlas/history/2026-09-17_1809.md)
+- [2026-09-18_0928.md](.codeatlas/history/2026-09-18_0928.md)
+- [2026-09-17_2057.md](.codeatlas/history/2026-09-17_2057.md)
+- [2026-09-17_2055.md](.codeatlas/history/2026-09-17_2055.md)
+- [2026-09-17_2053.md](.codeatlas/history/2026-09-17_2053.md)
+- [2026-09-17_1930.md](.codeatlas/history/2026-09-17_1930.md)

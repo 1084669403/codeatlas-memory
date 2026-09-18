@@ -18,6 +18,7 @@ ZH: 并发约定：每个函数自建 Store 并在返回前关闭（sqlite3 连�
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from .memory import AmbiguousSymbol, load_page, page_cost  # noqa: F401 (re-expo
 from .models import Page
 from .plan_memory import plan_doctor_problems, plan_doctor_warnings, write_stale_report
 from .plan_context import retrieve_plan_context
+from .plan_impact import compute_plan_impact, write_update_impact_report
 from .prefetch import prefetch as do_prefetch
 from .storage import Store
 
@@ -46,6 +48,8 @@ class UpdateOutcome:
     fell_back: bool  # no state.db -> a full scan ran instead
     history_path: Path | None
     language_switched: bool  # stored output lang differed; full re-scan done
+    impact_report_path: Path | None = None
+    impact_report: dict | None = None
 
 
 # ---------------------------------------------------------------- store helpers
@@ -135,10 +139,25 @@ def update_project(root: Path, lang: str = "en", max_tokens: int | None = None) 
             lang=lang, files_parsed=result.files_parsed, files_scanned=result.files_scanned,
         )
         write_stale_report(root, root / "docs" / "plans")
+        changed_files = sorted({str(change.file) for change in result.changes})
+        changed_symbols = sorted({str(change.symbol) for change in result.changes})
+        source_paths_by_symbol = {
+            str(change.symbol): str(change.file) for change in result.changes
+        }
+        impact_report_path = write_update_impact_report(
+            root,
+            changed_files=changed_files,
+            changed_symbols=changed_symbols,
+            source_paths_by_symbol=source_paths_by_symbol,
+            plans_dir=root / "docs" / "plans",
+        )
+        impact_report = json.loads(impact_report_path.read_text(encoding="utf-8"))
     finally:
         store.close()
     return UpdateOutcome(
         result=result, fell_back=False, history_path=history_path, language_switched=switched,
+        impact_report_path=impact_report_path,
+        impact_report=impact_report,
     )
 
 
@@ -198,6 +217,30 @@ def _search_row(row: tuple) -> dict:
 def plan_context(root: Path, query: str, *, limit: int = 8, max_tokens: int = 4_000) -> dict:
     """Retrieve bounded plan context; query text is data, never code."""
     return retrieve_plan_context(root, query, max_evidence=limit, max_tokens=max_tokens)
+
+
+def plan_impact(
+    root: Path,
+    plan_id: str,
+    *,
+    changed_files: list[str] | None = None,
+    changed_symbols: list[str] | None = None,
+    source_paths_by_symbol: dict[str, str] | None = None,
+    plans_dir: str | Path = "docs/plans",
+    max_items: int = 200,
+    use_index: bool = True,
+) -> dict:
+    """Compute bounded, read-only impact for one durable plan."""
+    return compute_plan_impact(
+        root,
+        plan_id,
+        changed_files=changed_files,
+        changed_symbols=changed_symbols,
+        source_paths_by_symbol=source_paths_by_symbol,
+        plans_dir=plans_dir,
+        max_items=max_items,
+        use_index=use_index,
+    )
 
 
 # ---------------------------------------------------------------- history

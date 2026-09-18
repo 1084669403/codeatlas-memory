@@ -31,7 +31,7 @@ from .plans import (
     plan_view,
 )
 from .plan_workflow import approve_plan, create_plan, diff_plan, reapprove_plan, revise_plan
-from .plan_workflow import complete_batch, find_gate_definition, mark_batch_stale, record_gate_result, start_batch
+from .plan_workflow import complete_batch, find_gate_definition, mark_batch_stale, record_gate_result, reopen_batch, start_batch
 from .gates import run_gate
 from .plan_memory import detect_stale_evidence
 from .storage import Store
@@ -147,6 +147,15 @@ def update(
         f"{result.files_skipped} skipped, {len(result.changes)} symbol change(s); "
         f"history -> {history_path.name}"
     )
+    affected_plans = (outcome.impact_report or {}).get("affected_plans", [])
+    if affected_plans:
+        console.print("[bold]Affected open plans[/bold]")
+        for plan in affected_plans:
+            batches = ", ".join(plan["affected_batches"])
+            refs = ", ".join(str(item["ref"]) for item in plan["items"])
+            console.print(f"- {plan['plan_id']} [{batches}] -> {refs}")
+    for warning in (outcome.impact_report or {}).get("warnings", []):
+        err_console.print(f"[yellow]Plan impact {warning['code']}: {warning['message']}[/yellow]")
 
 
 @app.command()
@@ -346,6 +355,60 @@ def plan_new(
         _print_json(payload)
     else:
         console.print(f"[green]Created plan[/green] {plan.id} -> {payload['path']}")
+
+
+@plan_app.command("impact")
+def plan_impact(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    changed_file: list[Path] = typer.Option([], "--changed-file", help="Repository-relative changed file; repeatable."),
+    changed_symbol: list[str] = typer.Option([], "--changed-symbol", help="Qualified changed symbol; repeatable."),
+    max_items: int = typer.Option(200, "--max-items", min=1, max=1000, help="Maximum impact items."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Report bounded read-only impact for one durable plan."""
+    root = path.resolve()
+    try:
+        payload = service.plan_impact(
+            root,
+            plan_id,
+            changed_files=[str(item) for item in changed_file],
+            changed_symbols=list(changed_symbol),
+            plans_dir=plans_dir,
+            max_items=max_items,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _print_json(payload)
+        return
+
+    if not payload["items"]:
+        console.print("[green]No plan impact detected.[/green]")
+    else:
+        table = Table(title=f"Plan impact: {payload['plan_id']}")
+        table.add_column("Level", no_wrap=True)
+        table.add_column("Batch", no_wrap=True)
+        table.add_column("Kind", no_wrap=True)
+        table.add_column("Ref", overflow="fold")
+        table.add_column("Path", overflow="fold")
+        table.add_column("Task", justify="right")
+        table.add_column("Confidence", justify="right")
+        for item in payload["items"]:
+            table.add_row(
+                item["level"], item["batch"], item["kind"], item["ref"],
+                item["source_path"] or "-",
+                "-" if item.get("task") is None else str(item["task"]),
+                f"{item['confidence']:.2f}",
+            )
+        console.print(table)
+    for warning in payload["warnings"]:
+        err_console.print(f"[yellow]{warning['code']}: {warning['message']}[/yellow]")
+    if payload["truncated"]:
+        err_console.print("[yellow]Impact output was truncated by the item cap.[/yellow]")
 
 
 @plan_app.command("show")
@@ -867,7 +930,7 @@ def version() -> None:
     console.print(f"codeatlas {__version__}")
 
 
-batch_app = typer.Typer(help="Start, complete, and invalidate validated plan batches.", no_args_is_help=True)
+batch_app = typer.Typer(help="Start, complete, reopen, and invalidate validated plan batches.", no_args_is_help=True)
 gate_app = typer.Typer(help="Run and record plan quality gates.", no_args_is_help=True)
 plan_app.add_typer(batch_app, name="batch")
 plan_app.add_typer(gate_app, name="gate")
@@ -1076,6 +1139,46 @@ def plan_batch_stale(
         _print_json(payload)
     else:
         console.print(f"[yellow]Marked batch stale[/yellow] {batch} at revision {payload['revision']}")
+
+
+@batch_app.command("reopen")
+def plan_batch_reopen(
+    plan_id: str = typer.Argument(..., help="Durable plan ID from frontmatter."),
+    batch: str = typer.Argument(..., help="Batch ID from the Batches table."),
+    path: Path = typer.Argument(Path("."), help="Project root."),
+    reason: str = typer.Option(..., "--reason", help="Why the stale batch needs fresh validation."),
+    actor: str = typer.Option("codex", "--actor", help="Actor recorded in the audit event."),
+    expected_revision: int | None = typer.Option(None, "--expected-revision", help="Reject the transition if the revision changed."),
+    plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
+    json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+) -> None:
+    """Reopen a stale batch in a done plan for fresh validation."""
+    root = path.resolve()
+    try:
+        directory = _plans_dir(root, plans_dir)
+        result = reopen_batch(
+            root,
+            directory,
+            plan_id,
+            batch=batch,
+            reason=reason,
+            expected_revision=expected_revision,
+            actor=actor,
+        )
+    except PlanError as exc:
+        err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
+        raise typer.Exit(1)
+    payload = {
+        "id": result.plan.id,
+        "batch": batch,
+        "status": result.plan.status,
+        "revision": result.plan.frontmatter["revision"],
+        "snapshot_path": result.snapshot_path.relative_to(root).as_posix(),
+    }
+    if json_output:
+        _print_json(payload)
+    else:
+        console.print(f"[yellow]Reopened batch[/yellow] {batch} at revision {payload['revision']}")
 
 
 def main() -> None:

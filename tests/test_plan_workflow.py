@@ -16,11 +16,16 @@ from codeatlas.plans import PlanError
 from codeatlas.plan_workflow import (
     approve_plan,
     canonical_plan_hash,
+    complete_batch,
     create_plan,
     diff_plan,
     plan_projection_path,
+    record_gate_result,
     reapprove_plan,
     revise_plan,
+    start_batch,
+    mark_batch_stale,
+    reopen_batch,
     write_plan_projection,
 )
 from codeatlas.plans import plan_view
@@ -204,6 +209,201 @@ def test_reapprove_rejects_plan_without_flag(temp_project: Path) -> None:
         )
 
     assert raised.value.code == "PLAN_REAPPROVAL_NOT_REQUIRED"
+
+
+def _completed_plan(temp_project: Path, *, slug: str = "reopen-smoke"):
+    created = create_plan(temp_project, temp_project / "docs" / "plans", slug=slug)
+    approved = approve_plan(
+        temp_project,
+        created.plan.path.parent,
+        created.plan.id,
+        approved_by="human-reviewer",
+        expected_revision=1,
+    )
+    started = start_batch(
+        temp_project,
+        approved.plan.path.parent,
+        approved.plan.id,
+        batch="B1",
+        expected_revision=2,
+    )
+    test_path = temp_project / "tests" / f"test_{slug.replace('-', '_')}.py"
+    test_path.parent.mkdir(exist_ok=True)
+    test_path.write_text("def test_first_task():\n    assert True\n", encoding="utf-8")
+    recorded = record_gate_result(
+        temp_project,
+        started.plan.path.parent,
+        started.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=3,
+        output_digest="sha256:fixed",
+    )
+    completed = complete_batch(
+        temp_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=4,
+    )
+    return completed
+
+
+def _completed_stale_plan(temp_project: Path):
+    completed = _completed_plan(temp_project)
+    return mark_batch_stale(
+        temp_project,
+        completed.plan.path.parent,
+        completed.plan.id,
+        batch="B1",
+        reason="Post-completion correction changed batch inputs",
+        expected_revision=5,
+    )
+
+
+def test_reopen_requires_stale_batch_in_done_plan(temp_project: Path) -> None:
+    stale = _completed_stale_plan(temp_project)
+
+    with pytest.raises(PlanError) as reason_error:
+        reopen_batch(
+            temp_project,
+            stale.plan.path.parent,
+            stale.plan.id,
+            batch="B1",
+            reason="   ",
+            expected_revision=6,
+        )
+    assert reason_error.value.code == "PLAN_REOPEN_REASON_REQUIRED"
+
+    passed = _completed_plan(temp_project, slug="reopen-passed")
+    with pytest.raises(PlanError) as batch_error:
+        reopen_batch(
+            temp_project,
+            passed.plan.path.parent,
+            passed.plan.id,
+            batch="B1",
+            reason="Batch is not stale",
+            expected_revision=5,
+        )
+    assert batch_error.value.code == "INVALID_TRANSITION"
+
+    plan_path = stale.plan.path
+    frontmatter = dict(stale.plan.frontmatter)
+    frontmatter["status"] = "executing"
+    frontmatter["content_hash"] = "pending"
+    plan_path.write_text(
+        f"---\n{yaml.safe_dump(frontmatter, sort_keys=True, allow_unicode=True)}---\n{stale.plan.body}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    with pytest.raises(PlanError) as status_error:
+        reopen_batch(
+            temp_project,
+            plan_path.parent,
+            stale.plan.id,
+            batch="B1",
+            reason="Plan is not done",
+        )
+    assert status_error.value.code == "PLAN_CONTENT_HASH_STALE"
+
+
+def test_reopen_changes_stale_batch_to_blocked(temp_project: Path) -> None:
+    stale = _completed_stale_plan(temp_project)
+
+    reopened = reopen_batch(
+        temp_project,
+        stale.plan.path.parent,
+        stale.plan.id,
+        batch="B1",
+        reason="Refresh gate evidence after post-completion correction",
+        expected_revision=6,
+    )
+
+    assert reopened.plan.status == "blocked"
+    assert reopened.plan.batches[0]["status"] == "blocked"
+    assert reopened.plan.tasks[0]["status"] == "blocked"
+    assert reopened.plan.frontmatter["revision"] == 7
+    assert reopened.plan.frontmatter["revision_type"] == "state"
+    assert reopened.plan.frontmatter["stale_evidence"][-1]["reason"] == (
+        "Post-completion correction changed batch inputs"
+    )
+    assert reopened.snapshot_path.name == "0007.md"
+    assert "batch_reopened" in reopened.event_path.read_text(encoding="utf-8")
+    assert lint_plan(reopened.plan.path, root=temp_project) == []
+
+
+def test_reopened_batch_can_start_for_fresh_evidence(temp_project: Path) -> None:
+    stale = _completed_stale_plan(temp_project)
+    reopened = reopen_batch(
+        temp_project,
+        stale.plan.path.parent,
+        stale.plan.id,
+        batch="B1",
+        reason="Refresh gate evidence",
+        expected_revision=6,
+    )
+
+    restarted = start_batch(
+        temp_project,
+        reopened.plan.path.parent,
+        reopened.plan.id,
+        batch="B1",
+        expected_revision=7,
+    )
+    assert restarted.plan.status == "executing"
+    assert restarted.plan.batches[0]["status"] == "in-progress"
+    assert restarted.plan.tasks[0]["status"] == "in-progress"
+    assert restarted.plan.frontmatter["batch_started_revision"] == 7
+
+    recorded = record_gate_result(
+        temp_project,
+        restarted.plan.path.parent,
+        restarted.plan.id,
+        gate_id="unit-tests",
+        outcome="passed",
+        actor="trusted-runner",
+        evidence_kind="runner",
+        batch="B1",
+        expected_revision=8,
+        output_digest="sha256:fixed",
+    )
+    completed = complete_batch(
+        temp_project,
+        recorded.plan.path.parent,
+        recorded.plan.id,
+        batch="B1",
+        expected_revision=9,
+    )
+    assert completed.plan.status == "done"
+    assert completed.plan.batches[0]["status"] == "passed"
+    assert completed.plan.tasks[0]["status"] == "done"
+
+
+def test_cli_reopens_stale_batch_for_revalidation(temp_project: Path) -> None:
+    stale = _completed_stale_plan(temp_project)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "plan", "batch", "reopen", stale.plan.id, "B1", str(temp_project),
+            "--reason", "Refresh gate evidence after post-completion correction",
+            "--expected-revision", "6",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["id"] == stale.plan.id
+    assert payload["batch"] == "B1"
+    assert payload["status"] == "blocked"
+    assert payload["revision"] == 7
+    assert payload["snapshot_path"] == f"docs/plans/revisions/{stale.plan.id}/0007.md"
 
 
 def test_diff_classifies_revisions(temp_project: Path) -> None:

@@ -616,8 +616,13 @@ def _require_execution_ready(plan: Plan, *, expected_revision: int | None, actor
         raise PlanError("PLAN_ACTOR_INVALID", "Execution requires an actor.", field="actor", path=plan.source_path)
     _require_expected_revision(plan, expected_revision)
     _require_current(plan)
-    if plan.status not in {"approved", "executing"}:
-        raise PlanError("PLAN_STATUS_INVALID", f"Only approved plans can execute; found {plan.status}.", field="status", path=plan.source_path)
+    if plan.status not in {"approved", "executing", "blocked"}:
+        raise PlanError(
+            "PLAN_STATUS_INVALID",
+            f"Only approved, executing, or reopened plans can execute; found {plan.status}.",
+            field="status",
+            path=plan.source_path,
+        )
     if plan.frontmatter.get("reapproval_required") is True:
         raise PlanError("PLAN_REAPPROVAL_REQUIRED", "A semantic revision requires human reapproval before execution.", field="reapproval_required", path=plan.source_path)
 
@@ -654,7 +659,7 @@ def start_batch(
 
     row["status"] = "in-progress"
     for task in plan.tasks:
-        if str(task.get("batch", "")) == batch and task.get("status") == "pending":
+        if str(task.get("batch", "")) == batch and task.get("status") in {"pending", "blocked"}:
             task["status"] = "in-progress"
     plan.frontmatter["status"] = "executing"
     plan.frontmatter["batch_started_revision"] = int(plan.frontmatter["revision"])
@@ -835,6 +840,60 @@ def mark_batch_stale(
         directory,
         plan,
         event="batch_stale",
+        actor=actor,
+        reason=reason,
+    )
+
+
+def reopen_batch(
+    root: str | Path,
+    plans_dir: str | Path,
+    plan_id: str,
+    *,
+    batch: str,
+    reason: str,
+    expected_revision: int | None = None,
+    actor: str = "codex",
+) -> WorkflowResult:
+    """Reopen a stale batch in a done plan for explicit fresh validation."""
+    root_path = Path(root).resolve()
+    directory = _plans_dir(root_path, Path(plans_dir))
+    plan = find_plan(plan_id, directory, root=root_path)
+    if not actor.strip():
+        raise PlanError("PLAN_ACTOR_INVALID", "Reopening requires an actor.", field="actor", path=plan.source_path)
+    _require_expected_revision(plan, expected_revision)
+    _require_current(plan)
+    if not reason.strip():
+        raise PlanError("PLAN_REOPEN_REASON_REQUIRED", "Reopening requires a reason.", field="reason", path=plan.source_path)
+    if plan.status != "done":
+        raise PlanError(
+            "PLAN_STATUS_INVALID",
+            f"Only a done plan can reopen a stale batch; found {plan.status}.",
+            field="status",
+            path=plan.source_path,
+        )
+
+    row = _batch_row(plan, batch)
+    if str(row.get("status", "")) != "stale":
+        raise PlanError(
+            "INVALID_TRANSITION",
+            f"Only a stale batch can be reopened; batch {batch} is {row.get('status')}.",
+            field=f"batches[{batch}].status",
+            path=plan.source_path,
+        )
+
+    row["status"] = "blocked"
+    for task in plan.tasks:
+        if str(task.get("batch", "")) == batch:
+            task["status"] = "blocked"
+    plan.frontmatter["status"] = "blocked"
+    plan.body = _append_execution_log(plan.body, f"Reopened batch {batch} for revalidation: {reason}")
+    _sync_body_tables(plan)
+    return _commit_state_revision(
+        root_path,
+        directory,
+        plan,
+        event="batch_reopened",
         actor=actor,
         reason=reason,
     )

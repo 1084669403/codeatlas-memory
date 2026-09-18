@@ -110,6 +110,14 @@ while doctor emits a non-fatal warning. A passed batch can be marked stale
 explicitly with `plan batch stale`; this preserves the plan status and records a
 durable audit revision.
 
+Revalidation is explicit rather than automatic. `plan batch reopen` accepts only
+a stale batch in a done plan, requires a non-empty reason, and records a durable
+`batch_reopened` revision. Reopening preserves stale evidence and old gate
+results while changing the batch, its linked tasks, and the plan to `blocked`.
+A subsequent `plan batch start` moves the reopened batch back into execution and
+advances the batch-start revision, so completion can use only fresh gate
+evidence recorded after that restart.
+
 ## Plan context
 
 `codeatlas plan context "<task>" --json` returns bounded, deterministic evidence
