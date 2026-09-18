@@ -411,6 +411,16 @@ def _format_history_store(store: Store, symbol: str, max_depth: int) -> str:
 
 # ---------------------------------------------------------------- context VM
 
+
+def context_scope_key(session_id: str = "", plan_id: str = "", batch_id: str = "") -> str:
+    """Return the bounded, deterministic identity of one context scope."""
+    return json.dumps(
+        [session_id, plan_id, batch_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 @dataclass
 class ContextLoadOutcome:
     """Everything a `context load` caller needs, computed while the store was open."""
@@ -430,6 +440,9 @@ def load_context_page(
     anchor: int | None = None,
     pin: bool = False,
     with_source: bool = False,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
 ) -> ContextLoadOutcome:
     """Load one page into the working set; enforce budget; prefetch neighbours.
 
@@ -442,10 +455,21 @@ def load_context_page(
     None；AmbiguousSymbol 携带候选列表。
     """
     store = require_store(root)
+    scope_key = context_scope_key(session_id, plan_id, batch_id)
+    if not store.acquire_working_set_lease(
+        scope_key, store.lease_owner, ttl_seconds=30
+    ):
+        store.close()
+        raise PermissionError(
+            f"Context lease is held for scope {scope_key}; retry after it expires."
+        )
     try:
         page = load_page(
             store, symbol, granularity, anchor_line=anchor, pin=pin, origin="load",
             with_source=with_source,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
         )
         if page is None:
             return ContextLoadOutcome(
@@ -453,8 +477,19 @@ def load_context_page(
             )
         rendered = memory.render_page_with_store(store, page)
         tokens = page_cost(page)
-        evicted, unsatisfied = memory.ensure_budget(store)
-        do_prefetch(store, page)
+        evicted, unsatisfied = memory.ensure_budget(
+            store,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
+        do_prefetch(
+            store,
+            page,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
         current_hash = store.get_file_hash(page.file)
         return ContextLoadOutcome(
             page=page,
@@ -465,6 +500,7 @@ def load_context_page(
             stale=bool(current_hash and current_hash != page.version),
         )
     finally:
+        store.release_working_set_lease(scope_key, store.lease_owner)
         store.close()
 
 
@@ -491,7 +527,7 @@ def context_page_json(root: Path, symbol: str, **kwargs) -> dict:
     }
 
 
-def format_status(root: Path) -> str:
+def format_status(root: Path, session_id: str = "", plan_id: str = "", batch_id: str = "") -> str:
     """Working-set status as a plain-text table (no ANSI/rich).
 
     EN: MCP-safe rendering of memory.status + budget bar + the >40% eviction
@@ -501,7 +537,12 @@ def format_status(root: Path) -> str:
     """
     store = require_store(root)
     try:
-        rows = memory.status(store)
+        rows = memory.status(
+            store,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
         b = memory.load_budget(store)
         total_tokens = sum(r.tokens for r in rows)
 
@@ -547,6 +588,9 @@ def evict_pages(
     pin: bool = False,
     unpin: bool = False,
     force: bool = False,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
 ) -> str:
     """Evict / pin / unpin working-set pages; returns a plain-text outcome.
 
@@ -557,17 +601,35 @@ def evict_pages(
     pinned（force 例外）；单页淘汰遇 pinned 需 force。
     """
     store = require_store(root)
+    scope_key = context_scope_key(session_id, plan_id, batch_id)
+    if not store.acquire_working_set_lease(
+        scope_key, store.lease_owner, ttl_seconds=30
+    ):
+        store.close()
+        raise PermissionError(
+            f"Context lease is held for scope {scope_key}; retry after it expires."
+        )
     try:
         if pin or unpin:
             target = page_id
-            entry = store.get_working_set_entry(target)
+            entry = store.get_working_set_entry(
+                target,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
             if entry is None:
                 raise KeyError(f"Not in working set: {target}")
             entry.pinned = pin and True or (False if unpin else entry.pinned)
             store.upsert_working_set(entry)
             return f"{'pinned' if pin else 'unpinned'} {target}"
         if all_pages:
-            entries = store.working_set_entries()
+            entries = memory.entries_for_scope(
+                store,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
             if not force:
                 entries = [e for e in entries if not e.pinned]
             # EN: with force, bypass memory.evict — it never evicts pinned
@@ -579,24 +641,46 @@ def evict_pages(
             if force:
                 freed = 0
                 for e in entries:
-                    store.delete_working_set_entry(e.page_id)
+                    store.delete_working_set_entry(
+                        e.page_id,
+                        session_id=e.session_id,
+                        plan_id=e.plan_id,
+                        batch_id=e.batch_id,
+                    )
                     freed += 1
                 if freed:
                     store.add_evict_count(freed)
                 return f"Evicted {freed} page(s)"
             total = sum(e.tokens for e in entries)
-            evicted, _unsat = memory.evict(store, total)
+            evicted, _unsat = memory.evict(
+                store,
+                total,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
             return f"Evicted {len(evicted)} page(s)"
         if not page_id:
             raise ValueError("Provide a page_id or all=True")
-        entry = store.get_working_set_entry(page_id)
+        entry = store.get_working_set_entry(
+            page_id,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
         if entry is None:
             raise KeyError(f"Not in working set: {page_id}")
         if entry.pinned and not force:
             raise PermissionError("Page is pinned — use force=True to evict.")
-        store.delete_working_set_entry(page_id)
+        store.delete_working_set_entry(
+            page_id,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
         return f"Evicted {page_id}"
     finally:
+        store.release_working_set_lease(scope_key, store.lease_owner)
         store.close()
 
 

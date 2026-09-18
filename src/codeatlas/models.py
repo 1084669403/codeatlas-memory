@@ -146,6 +146,9 @@ class WorkingSetEntry:
     pinned: bool = False
     tokens: int = 0
     origin: str = "load"  # load | prefetch
+    session_id: str = ""  # empty = no terminal/session restriction
+    plan_id: str = ""  # empty = no plan/task restriction
+    batch_id: str = ""  # empty = no batch restriction
 
 
 @dataclass

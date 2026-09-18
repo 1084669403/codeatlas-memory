@@ -100,6 +100,41 @@ def test_service_context_load_and_status(indexed_project: Path):
     assert "process" in st
 
 
+async def test_mcp_context_scope_parameters(indexed_project: Path):
+    server = build_server()
+    page_id = "process"
+    loaded = await _call(
+        server,
+        "context_load",
+        {
+            "root": str(indexed_project),
+            "symbol": page_id,
+            "session_id": "session-a",
+            "plan_id": "plan-a",
+            "batch_id": "batch-1",
+        },
+    )
+    assert "### " in loaded
+
+    status = await _call(
+        server,
+        "context_status",
+        {"root": str(indexed_project), "plan_id": "plan-a"},
+    )
+    assert "process" in status
+
+    evicted = await _call(
+        server,
+        "context_evict",
+        {
+            "root": str(indexed_project),
+            "all": True,
+            "plan_id": "plan-a",
+        },
+    )
+    assert "Evicted" in evicted
+
+
 def test_service_context_load_ambiguous(indexed_project: Path):
     util = indexed_project / "src" / "utils.py"
     util.write_text(

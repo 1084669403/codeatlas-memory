@@ -732,6 +732,9 @@ def context_load(
     no_prefetch: bool = typer.Option(False, "--no-prefetch", help="Skip neighbour prefetch."),
     source: bool = typer.Option(False, "--source", help="Attach a body excerpt (<=800 tokens)."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of markdown."),
+    session_id: str = typer.Option("", "--session", help="Working-set session scope."),
+    plan_id: str = typer.Option("", "--plan", help="Working-set plan scope."),
+    batch_id: str = typer.Option("", "--batch", help="Working-set batch scope."),
 ) -> None:
     """Load one page into the working set and print it (pure markdown to stdout)."""
     if granularity not in (None, "function", "file"):
@@ -746,6 +749,9 @@ def context_load(
         try:
             outcome = service.load_context_page(
                 root, symbol, granularity, anchor=anchor, pin=pin, with_source=source,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
             )
         except AmbiguousSymbol as amb:
             if json_output:
@@ -759,6 +765,9 @@ def context_load(
             raise typer.Exit(2)
     except FileNotFoundError:
         err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
+        raise typer.Exit(1)
+    except PermissionError as exc:
+        err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
     if outcome.page is None:
@@ -806,11 +815,19 @@ def context_load(
 @context_app.command("status")
 def context_status(
     path: Path = typer.Argument(Path("."), help="Project root."),
+    session_id: str = typer.Option("", "--session", help="Working-set session scope."),
+    plan_id: str = typer.Option("", "--plan", help="Working-set plan scope."),
+    batch_id: str = typer.Option("", "--batch", help="Working-set batch scope."),
 ) -> None:
     """Show the working set: pages, tokens, recency, stale/gone, budget bar."""
     root, _store = _require_index(path)
     try:
-        text = service.format_status(root)
+        text = service.format_status(
+            root,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )
     except FileNotFoundError:
         err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")
         raise typer.Exit(1)
@@ -825,12 +842,18 @@ def context_evict(
     pin: bool = typer.Option(False, "--pin", help="Pin instead of evict."),
     unpin: bool = typer.Option(False, "--unpin", help="Unpin the page."),
     force: bool = typer.Option(False, "--force", help="With --all: evict pinned pages too."),
+    session_id: str = typer.Option("", "--session", help="Working-set session scope."),
+    plan_id: str = typer.Option("", "--plan", help="Working-set plan scope."),
+    batch_id: str = typer.Option("", "--batch", help="Working-set batch scope."),
 ) -> None:
     """Evict pages from the working set (--all keeps pinned; --force evicts all)."""
     root, _store = _require_index(path)
     try:
         msg = service.evict_pages(
             root, page_id, all_pages=all_pages, pin=pin, unpin=unpin, force=force,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
         )
     except FileNotFoundError:
         err_console.print(f"[red]{service.NO_INDEX_MSG}[/red]")

@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 15:47
+generated: 2026-09-18 16:14
 language: en
-files: 61
-symbols: 584
-last_scan: 2026-09-18T07:47:37+00:00
+files: 63
+symbols: 599
+last_scan: 2026-09-18T08:14:24+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -16,6 +16,16 @@ last_scan: 2026-09-18T07:47:37+00:00
 ```mermaid
 graph TD
     d___root___f1fabfb4["/"]
+    d__test_tmp_9b1c8f59[".test-tmp"]
+    d___root___f1fabfb4 --> d__test_tmp_9b1c8f59
+    d_4af0b8d9402074bda053_3cd526c3["7ae9a5b9063b4af0b8d9402074bda053"]
+    d__test_tmp_9b1c8f59 --> d_4af0b8d9402074bda053_3cd526c3
+    d_b8d9402074bda053_src_90e0909f["src"]
+    d_4af0b8d9402074bda053_3cd526c3 --> d_b8d9402074bda053_src_90e0909f
+    f_da053_src_handler_py_375ea809["handler.py"]
+    d_b8d9402074bda053_src_90e0909f --> f_da053_src_handler_py_375ea809
+    f_074bda053_src_svc_py_330df13c["svc.py"]
+    d_b8d9402074bda053_src_90e0909f --> f_074bda053_src_svc_py_330df13c
     d_demo_todo_af73008e["demo-todo"]
     d___root___f1fabfb4 --> d_demo_todo_af73008e
     d_demo_todo_app_c6975872["app"]
@@ -173,6 +183,9 @@ flowchart LR
 
 ```mermaid
 classDiagram
+    class c__src_svc_TaskService_d989d0c3 {
+        TaskService
+    }
     class c_oller_TaskController_85e43147 {
         TaskController
     }
@@ -333,6 +346,8 @@ flowchart TD
 
 | File | Lang | Role | Symbols | Ref'd |
 |---|---|---|---:|---:|
+| `.test-tmp/7ae9a5b9063b4af0b8d9402074bda053/src/handler.py` | python | module | 1 | 0 |
+| `.test-tmp/7ae9a5b9063b4af0b8d9402074bda053/src/svc.py` | python | module | 4 | 0 |
 | `demo-todo/app/controllers/task_controller.py` | python | controller | 4 | 0 |
 | `demo-todo/app/main.py` | python | entry | 1 | 0 |
 | `demo-todo/app/models/task.py` | python | model | 3 | 0 |
@@ -358,7 +373,7 @@ flowchart TD
 | `src/codeatlas/indexer.py` | python | module | 12 | 0 |
 | `src/codeatlas/markdown.py` | python | module | 6 | 0 |
 | `src/codeatlas/mcp_server.py` | python | module | 7 | 0 |
-| `src/codeatlas/memory.py` | python | module | 26 | 0 |
+| `src/codeatlas/memory.py` | python | module | 27 | 0 |
 | `src/codeatlas/models.py` | python | module | 3 | 0 |
 | `src/codeatlas/parser.py` | python | module | 19 | 0 |
 | `src/codeatlas/plan_context.py` | python | module | 9 | 0 |
@@ -368,20 +383,20 @@ flowchart TD
 | `src/codeatlas/plans.py` | python | module | 34 | 0 |
 | `src/codeatlas/prefetch.py` | python | module | 5 | 0 |
 | `src/codeatlas/scanner.py` | python | module | 2 | 0 |
-| `src/codeatlas/service.py` | python | module | 19 | 0 |
-| `src/codeatlas/storage.py` | python | module | 46 | 0 |
+| `src/codeatlas/service.py` | python | module | 20 | 0 |
+| `src/codeatlas/storage.py` | python | module | 49 | 0 |
 | `src/codeatlas/summarizer.py` | python | module | 10 | 0 |
 | `tests/conftest.py` | python | test | 0 | 0 |
 | `tests/test_budget.py` | python | test | 7 | 0 |
 | `tests/test_callgraph.py` | python | test | 9 | 0 |
 | `tests/test_changelog.py` | python | test | 11 | 0 |
 | `tests/test_consistency_e2e.py` | python | test | 7 | 0 |
-| `tests/test_context_e2e.py` | python | test | 13 | 0 |
+| `tests/test_context_e2e.py` | python | test | 15 | 0 |
 | `tests/test_diagrams.py` | python | test | 10 | 0 |
 | `tests/test_execution_quality.py` | python | test | 16 | 0 |
 | `tests/test_indexer.py` | python | test | 9 | 0 |
 | `tests/test_markdown.py` | python | test | 6 | 0 |
-| `tests/test_mcp_server.py` | python | test | 25 | 0 |
+| `tests/test_mcp_server.py` | python | test | 26 | 0 |
 | `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_memory_graph.py` | python | test | 9 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
@@ -392,13 +407,13 @@ flowchart TD
 | `tests/test_prefetch.py` | python | test | 8 | 0 |
 | `tests/test_query_history.py` | python | test | 6 | 0 |
 | `tests/test_scanner.py` | python | test | 5 | 0 |
-| `tests/test_storage.py` | python | test | 6 | 0 |
+| `tests/test_storage.py` | python | test | 8 | 0 |
 | `tests/test_summarizer.py` | python | test | 6 | 0 |
 
 ## Recent Changes
 
+- [2026-09-18_1547.md](.codeatlas/history/2026-09-18_1547.md)
 - [2026-09-18_1543.md](.codeatlas/history/2026-09-18_1543.md)
 - [2026-09-18_1541.md](.codeatlas/history/2026-09-18_1541.md)
 - [2026-09-18_1533.md](.codeatlas/history/2026-09-18_1533.md)
 - [2026-09-18_1500.md](.codeatlas/history/2026-09-18_1500.md)
-- [2026-09-18_1135.md](.codeatlas/history/2026-09-18_1135.md)

@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import uuid
 
 from .models import (
     BODY_MAX_BYTES,
@@ -31,7 +33,7 @@ from .models import (
     WorkingSetEntry,
 )
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -112,12 +114,22 @@ CREATE TABLE IF NOT EXISTS pages (
 );
 
 CREATE TABLE IF NOT EXISTS working_set (
-    page_id TEXT PRIMARY KEY,
+    page_id TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    plan_id TEXT NOT NULL DEFAULT '',
+    batch_id TEXT NOT NULL DEFAULT '',
     loaded_at TEXT NOT NULL,
     last_access_at TEXT NOT NULL,
     pinned INTEGER NOT NULL DEFAULT 0,
     tokens INTEGER NOT NULL DEFAULT 0,
-    origin TEXT NOT NULL DEFAULT 'load'
+    origin TEXT NOT NULL DEFAULT 'load',
+    PRIMARY KEY (session_id, plan_id, batch_id, page_id)
+);
+
+CREATE TABLE IF NOT EXISTS context_leases (
+    scope_key TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_changes_symbol ON changes(symbol);
@@ -143,6 +155,8 @@ _MIGRATIONS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+_WORKING_SET_SCOPE_COLUMNS = {"session_id", "plan_id", "batch_id"}
+
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     """Open a connection with WAL + FK enforcement applied."""
@@ -162,6 +176,7 @@ class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.conn = _connect(db_path)
+        self.lease_owner = uuid.uuid4().hex
         self.conn.executescript(_SCHEMA)
         self._migrate()
         self.conn.commit()
@@ -185,6 +200,57 @@ class Store:
             for column, ddl in columns:
                 if column not in existing:
                     self.conn.execute(ddl)
+        self._migrate_working_set_scope()
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_working_set_scope "
+            "ON working_set(session_id, plan_id, batch_id, last_access_at)"
+        )
+
+    def _migrate_working_set_scope(self) -> None:
+        """Rebuild a pre-scope working_set as the compatibility/global scope.
+
+        EN: SQLite cannot widen a PRIMARY KEY in place. Copy old rows into a
+        new composite-key table in one transaction, then atomically swap it.
+        ZH: SQLite cannot widen a PRIMARY KEY in place. Copy old rows into a
+        new composite-key table in one transaction, then atomically swap it.
+        """
+        existing = {row[1] for row in self.conn.execute("PRAGMA table_info(working_set)")}
+        if not existing or _WORKING_SET_SCOPE_COLUMNS.issubset(existing):
+            return
+
+        self.conn.execute("DROP INDEX IF EXISTS idx_working_set_scope")
+        self.conn.execute("DROP TABLE IF EXISTS working_set_scope_v3")
+        self.conn.execute(
+            """
+            CREATE TABLE working_set_scope_v3 (
+                page_id TEXT NOT NULL,
+                session_id TEXT NOT NULL DEFAULT '',
+                plan_id TEXT NOT NULL DEFAULT '',
+                batch_id TEXT NOT NULL DEFAULT '',
+                loaded_at TEXT NOT NULL,
+                last_access_at TEXT NOT NULL,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                origin TEXT NOT NULL DEFAULT 'load',
+                PRIMARY KEY (session_id, plan_id, batch_id, page_id)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO working_set_scope_v3
+                (page_id, session_id, plan_id, batch_id, loaded_at, last_access_at,
+                 pinned, tokens, origin)
+            SELECT page_id, '', '', '', loaded_at, last_access_at, pinned, tokens, origin
+            FROM working_set
+            """
+        )
+        self.conn.execute("DROP TABLE working_set")
+        self.conn.execute("ALTER TABLE working_set_scope_v3 RENAME TO working_set")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_working_set_scope "
+            "ON working_set(session_id, plan_id, batch_id, last_access_at)"
+        )
 
     # ------------------------------------------------------------------ meta
 
@@ -537,19 +603,39 @@ class Store:
 
     def upsert_working_set(self, entry: WorkingSetEntry) -> None:
         self.conn.execute(
-            "INSERT INTO working_set(page_id, loaded_at, last_access_at, pinned, tokens, origin) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(page_id) DO UPDATE SET last_access_at = excluded.last_access_at, "
+            "INSERT INTO working_set("
+            "page_id, session_id, plan_id, batch_id, loaded_at, last_access_at, pinned, tokens, origin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, plan_id, batch_id, page_id) DO UPDATE SET last_access_at = excluded.last_access_at, "
             "tokens = excluded.tokens, pinned = excluded.pinned, origin = excluded.origin",
-            (entry.page_id, entry.loaded_at, entry.last_access_at, int(entry.pinned), entry.tokens, entry.origin),
+            (
+                entry.page_id,
+                entry.session_id,
+                entry.plan_id,
+                entry.batch_id,
+                entry.loaded_at,
+                entry.last_access_at,
+                int(entry.pinned),
+                entry.tokens,
+                entry.origin,
+            ),
         )
         self.conn.commit()
 
-    def get_working_set_entry(self, page_id: str) -> WorkingSetEntry | None:
+    def get_working_set_entry(
+        self,
+        page_id: str,
+        *,
+        session_id: str = "",
+        plan_id: str = "",
+        batch_id: str = "",
+    ) -> WorkingSetEntry | None:
         row = self.conn.execute(
-            "SELECT page_id, loaded_at, last_access_at, pinned, tokens, origin "
-            "FROM working_set WHERE page_id = ?",
-            (page_id,),
+            "SELECT page_id, loaded_at, last_access_at, pinned, tokens, origin, "
+            "session_id, plan_id, batch_id "
+            "FROM working_set WHERE session_id = ? AND plan_id = ? AND batch_id = ? "
+            "AND page_id = ?",
+            (session_id, plan_id, batch_id, page_id),
         ).fetchone()
         if row is None:
             return None
@@ -560,11 +646,15 @@ class Store:
             pinned=bool(row[3]),
             tokens=row[4],
             origin=row[5],
+            session_id=row[6],
+            plan_id=row[7],
+            batch_id=row[8],
         )
 
     def working_set_entries(self) -> list[WorkingSetEntry]:
         rows = self.conn.execute(
-            "SELECT page_id, loaded_at, last_access_at, pinned, tokens, origin FROM working_set"
+            "SELECT page_id, loaded_at, last_access_at, pinned, tokens, origin, "
+            "session_id, plan_id, batch_id FROM working_set"
         ).fetchall()
         return [
             WorkingSetEntry(
@@ -574,18 +664,81 @@ class Store:
                 pinned=bool(r[3]),
                 tokens=r[4],
                 origin=r[5],
+                session_id=r[6],
+                plan_id=r[7],
+                batch_id=r[8],
             )
             for r in rows
         ]
 
-    def delete_working_set_entry(self, page_id: str) -> None:
-        self.conn.execute("DELETE FROM working_set WHERE page_id = ?", (page_id,))
+    def delete_working_set_entry(
+        self,
+        page_id: str,
+        *,
+        session_id: str = "",
+        plan_id: str = "",
+        batch_id: str = "",
+    ) -> None:
+        self.conn.execute(
+            "DELETE FROM working_set WHERE session_id = ? AND plan_id = ? AND batch_id = ? "
+            "AND page_id = ?",
+            (session_id, plan_id, batch_id, page_id),
+        )
         self.conn.commit()
 
     def clear_working_set(self) -> None:
         """Remove all working-set rows (used after a full scan rebuild)."""
         self.conn.execute("DELETE FROM working_set")
         self.conn.commit()
+
+    def acquire_working_set_lease(
+        self,
+        scope_key: str,
+        owner: str,
+        *,
+        ttl_seconds: int = 30,
+    ) -> bool:
+        """Atomically acquire or renew a short-lived context write lease.
+
+        EN: a same-owner acquisition renews; an expired foreign lease can be
+        taken over. The conditional upsert avoids a check-then-write race.
+        ZH: 同一 owner 可续租；过期的外部租约可接管。条件 upsert 避免
+        “先检查再写入”的竞态。
+        """
+        if not scope_key or not owner:
+            raise ValueError("scope_key and owner are required")
+        if ttl_seconds < 0:
+            raise ValueError("ttl_seconds must be non-negative")
+
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        cursor = self.conn.execute(
+            "INSERT INTO context_leases(scope_key, owner, expires_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(scope_key) DO UPDATE SET "
+            "owner = excluded.owner, expires_at = excluded.expires_at "
+            "WHERE context_leases.owner = excluded.owner "
+            "OR context_leases.expires_at <= ?",
+            (
+                scope_key,
+                owner,
+                expires_at.isoformat(timespec="milliseconds"),
+                now.isoformat(timespec="milliseconds"),
+            ),
+        )
+        self.conn.commit()
+        return cursor.rowcount == 1
+
+    def release_working_set_lease(self, scope_key: str, owner: str) -> bool:
+        """Release a context write lease if the caller still owns it."""
+        if not scope_key or not owner:
+            raise ValueError("scope_key and owner are required")
+        cursor = self.conn.execute(
+            "DELETE FROM context_leases WHERE scope_key = ? AND owner = ?",
+            (scope_key, owner),
+        )
+        self.conn.commit()
+        return cursor.rowcount == 1
 
     # ------------------------------------------------------- index bookkeeping
 

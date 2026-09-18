@@ -259,6 +259,9 @@ def build_server():
         pin: bool = False,
         source: bool = False,
         root: str | None = None,
+        session_id: str = "",
+        plan_id: str = "",
+        batch_id: str = "",
     ) -> str:
         """Load one symbol/file page into the token-budgeted working set.
 
@@ -273,6 +276,9 @@ def build_server():
             try:
                 outcome = service.load_context_page(
                     r, symbol, granularity, anchor=anchor, pin=pin, with_source=source,
+                    session_id=session_id,
+                    plan_id=plan_id,
+                    batch_id=batch_id,
                 )
             except service.AmbiguousSymbol as amb:
                 return json.dumps(
@@ -294,11 +300,21 @@ def build_server():
         return outcome.rendered + "\n" + "\n".join(f"({n})" for n in notes)
 
     @mcp.tool()
-    def context_status(root: str | None = None) -> str:
+    def context_status(
+        root: str | None = None,
+        session_id: str = "",
+        plan_id: str = "",
+        batch_id: str = "",
+    ) -> str:
         """Show the working set: resident pages, tokens, staleness, budget bar."""
         try:
             r = _root(root)
-            return service.format_status(r)
+            return service.format_status(
+                r,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
         except FileNotFoundError as e:
             return str(e)
 
@@ -308,6 +324,9 @@ def build_server():
         all: bool = False,
         force: bool = False,
         root: str | None = None,
+        session_id: str = "",
+        plan_id: str = "",
+        batch_id: str = "",
     ) -> str:
         """Evict pages from the working set (all=true keeps pinned unless force).
 
@@ -316,7 +335,15 @@ def build_server():
         """
         try:
             r = _root(root)
-            return service.evict_pages(r, page_id, all_pages=all, force=force)
+            return service.evict_pages(
+                r,
+                page_id,
+                all_pages=all,
+                force=force,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
         except FileNotFoundError as e:
             return str(e)
         except KeyError as e:

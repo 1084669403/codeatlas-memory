@@ -12,6 +12,10 @@ from typer.testing import CliRunner
 
 from codeatlas.cli import app
 from codeatlas.indexer import run_scan, run_update
+from codeatlas.memory import evict as evict_pages
+from codeatlas.memory import status as context_status
+from codeatlas.service import context_scope_key
+from codeatlas.service import load_context_page
 from codeatlas.storage import Store
 
 runner = CliRunner()
@@ -226,3 +230,109 @@ def test_anchor_not_written_on_ambiguity(tmp_path: Path) -> None:
         assert store.get_meta("last_anchor") == "sentinel:9"  # untouched
     finally:
         store.close()
+
+
+def test_scoped_load_status_and_eviction_are_isolated(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    _scan(project)
+    page_id = "src.svc.mark_done"
+    plan_a = load_context_page(project, page_id, plan_id="plan-a")
+    plan_b = load_context_page(project, page_id, plan_id="plan-b")
+
+    assert plan_a.page is not None and plan_b.page is not None
+    assert plan_a.page.page_id == page_id
+
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        entries = store.working_set_entries()
+        assert {entry.plan_id for entry in entries} == {"plan-a", "plan-b"}
+
+        status_a = context_status(store, plan_id="plan-a")
+        assert all(row.plan_id == "plan-a" for row in status_a)
+        assert page_id in {row.page_id for row in status_a}
+
+        plan_a_tokens = sum(
+            entry.tokens for entry in entries if entry.plan_id == "plan-a"
+        )
+        evicted, unsatisfied = evict_pages(
+            store,
+            plan_a_tokens,
+            plan_id="plan-a",
+        )
+
+        assert unsatisfied == 0
+        assert evicted
+        remaining = store.working_set_entries()
+        assert page_id in {entry.page_id for entry in remaining}
+        assert {entry.plan_id for entry in remaining if entry.page_id == page_id} == {"plan-b"}
+        assert all(entry.plan_id != "plan-a" for entry in remaining)
+    finally:
+        store.close()
+
+
+def test_context_scope_cli_and_lease_contract(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    _scan(project)
+    page_id = "src.svc.mark_done"
+    scope = context_scope_key("session-a", "plan-a", "batch-1")
+
+    load = runner.invoke(
+        app,
+        [
+            "context", "load", page_id, str(project),
+            "--session", "session-a",
+            "--plan", "plan-a",
+            "--batch", "batch-1",
+        ],
+    )
+    assert load.exit_code == 0, load.output
+
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        entry = store.get_working_set_entry(
+            page_id,
+            session_id="session-a",
+            plan_id="plan-a",
+            batch_id="batch-1",
+        )
+        assert entry is not None
+
+        assert store.acquire_working_set_lease(scope, "other-writer", ttl_seconds=60)
+    finally:
+        store.close()
+
+    blocked = runner.invoke(
+        app,
+        [
+            "context", "load", page_id, str(project),
+            "--session", "session-a",
+            "--plan", "plan-a",
+            "--batch", "batch-1",
+        ],
+    )
+    assert blocked.exit_code == 1
+    assert "lease" in blocked.output.lower()
+
+    store = Store(project / ".codeatlas" / "state.db")
+    try:
+        assert store.release_working_set_lease(scope, "other-writer")
+    finally:
+        store.close()
+
+    retried = runner.invoke(
+        app,
+        [
+            "context", "load", page_id, str(project),
+            "--session", "session-a",
+            "--plan", "plan-a",
+            "--batch", "batch-1",
+        ],
+    )
+    assert retried.exit_code == 0, retried.output
+
+    status = runner.invoke(
+        app,
+        ["context", "status", str(project), "--plan", "plan-a"],
+    )
+    assert status.exit_code == 0, status.output
+    assert page_id in status.output

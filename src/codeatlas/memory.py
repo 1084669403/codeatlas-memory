@@ -89,6 +89,9 @@ def load_page(
     pin: bool = False,
     origin: str = "load",
     with_source: bool = False,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
 ) -> Page | None:
     """Load one page into the working set and return it.
 
@@ -115,7 +118,12 @@ def load_page(
         index_version=store.index_version(),
     )
 
-    entry = store.get_working_set_entry(page.page_id)
+    entry = store.get_working_set_entry(
+        page.page_id,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
     tokens = page_cost(page)
     if entry is None:
         entry = WorkingSetEntry(
@@ -125,6 +133,9 @@ def load_page(
             pinned=pin,
             tokens=tokens,
             origin=origin,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
         )
     else:
         # touch: refresh access time and tokens; keep pinned unless upgraded
@@ -144,6 +155,37 @@ def page_cost(page: Page) -> int:
     """Token cost of one page including per-page overhead."""
     rendered = _render_function_page(page, "en") if page.granularity == "function" else ""
     return budget.page_cost(rendered) if rendered else budget.OVERHEAD
+
+
+def entries_for_scope(
+    store: Store,
+    *,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
+) -> list[WorkingSetEntry]:
+    """Return working-set entries for one scope.
+
+    EN: no scope selects only the compatibility/global set. A non-empty scope
+    filter narrows matching rows and allows broader views (for example, all
+    batches in one plan).
+    ZH: 无 scope 参数只选择兼容的 global 工作集；非空 scope 字段按条件过滤，
+    支持更宽的视图（例如一个 plan 的所有 batch）。
+    """
+    entries = store.working_set_entries()
+    if not session_id and not plan_id and not batch_id:
+        return [
+            entry
+            for entry in entries
+            if not (entry.session_id or entry.plan_id or entry.batch_id)
+        ]
+    return [
+        entry
+        for entry in entries
+        if (not session_id or entry.session_id == session_id)
+        and (not plan_id or entry.plan_id == plan_id)
+        and (not batch_id or entry.batch_id == batch_id)
+    ]
 
 
 def _build_page(
@@ -396,7 +438,14 @@ def _parse_anchor(store: Store) -> tuple[str | None, int | None]:
         return None, None
 
 
-def evict(store: Store, need_tokens: int) -> tuple[list[str], int]:
+def evict(
+    store: Store,
+    need_tokens: int,
+    *,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
+) -> tuple[list[str], int]:
     """Evict cold pages to free at least need_tokens; returns (evicted, unsatisfied).
 
     EN: locality is computed fresh against meta['last_anchor'] (v6: no cached
@@ -409,7 +458,12 @@ def evict(store: Store, need_tokens: int) -> tuple[list[str], int]:
     （方案 P1-6 可见性）。
     """
     pages: dict[str, Page] = {}
-    entries = store.working_set_entries()
+    entries = entries_for_scope(
+        store,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
     plan: list[tuple[str, float, float, bool, str, int]] = []
     for entry in entries:
         page = _build_page(store, entry.page_id, None, False)
@@ -433,10 +487,15 @@ def evict(store: Store, need_tokens: int) -> tuple[list[str], int]:
     evicted: list[str] = []
     freed = 0
     for page_id in order:
-        entry = store.get_working_set_entry(page_id)
+        entry = next((item for item in entries if item.page_id == page_id), None)
         if entry is None:
             continue
-        store.delete_working_set_entry(page_id)
+        store.delete_working_set_entry(
+            page_id,
+            session_id=entry.session_id,
+            plan_id=entry.plan_id,
+            batch_id=entry.batch_id,
+        )
         evicted.append(page_id)
         freed += entry.tokens
         if freed >= need_tokens:
@@ -447,7 +506,13 @@ def evict(store: Store, need_tokens: int) -> tuple[list[str], int]:
     return evicted, unsatisfied
 
 
-def ensure_budget(store: Store) -> tuple[list[str], int]:
+def ensure_budget(
+    store: Store,
+    *,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
+) -> tuple[list[str], int]:
     """Enforce working_set/max_pages budgets before inserting a new page.
 
     EN: returns (evicted, unsatisfied_tokens) — caller warns when the
@@ -457,7 +522,12 @@ def ensure_budget(store: Store) -> tuple[list[str], int]:
     超过 max_pages 的 40% 时给出调参建议（方案 P1-6）。
     """
     b = load_budget(store)
-    entries = store.working_set_entries()
+    entries = entries_for_scope(
+        store,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
     total_tokens = sum(e.tokens for e in entries)
     need = max(0, total_tokens - b.working_set)
     over_pages = max(0, len(entries) - b.max_pages)
@@ -465,8 +535,19 @@ def ensure_budget(store: Store) -> tuple[list[str], int]:
         return [], 0
     # EN: evict for tokens first, then trim pages by coldness.
     # ZH: 先按 token 淘汰，再按冷度裁页。
-    evicted, unsatisfied = evict(store, need)
-    entries = store.working_set_entries()
+    evicted, unsatisfied = evict(
+        store,
+        need,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
+    entries = entries_for_scope(
+        store,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
     if len(entries) > b.max_pages:
         plan: list[tuple[str, float, float, bool, str, int]] = []
         for entry in entries:
@@ -475,7 +556,15 @@ def ensure_budget(store: Store) -> tuple[list[str], int]:
             plan.append((entry.page_id, recency_of(entry), loc, entry.pinned, entry.origin, entry.tokens))
         order = budget.suggest_evictions(plan, 0)
         for page_id in order[: len(entries) - b.max_pages]:
-            store.delete_working_set_entry(page_id)
+            entry = next((item for item in entries if item.page_id == page_id), None)
+            if entry is None:
+                continue
+            store.delete_working_set_entry(
+                page_id,
+                session_id=entry.session_id,
+                plan_id=entry.plan_id,
+                batch_id=entry.batch_id,
+            )
             evicted.append(page_id)
     return evicted, unsatisfied
 
@@ -499,12 +588,26 @@ class PageStatus:
     # 时为 0。
     loaded_index_version: int = 0
     current_index_version: int = 0
+    session_id: str = ""
+    plan_id: str = ""
+    batch_id: str = ""
 
 
-def status(store: Store) -> list[PageStatus]:
+def status(
+    store: Store,
+    *,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
+) -> list[PageStatus]:
     """Working-set status with stale/gone split (plan v3)."""
     out: list[PageStatus] = []
-    for entry in store.working_set_entries():
+    for entry in entries_for_scope(
+        store,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    ):
         row = store.symbol_row(entry.page_id) if not _is_file_page(entry.page_id) else None
         if row is not None:
             state = "fresh"
@@ -538,6 +641,9 @@ def status(store: Store) -> list[PageStatus]:
                 state=state,
                 loaded_index_version=page_row[6] if page_row else 0,
                 current_index_version=store.index_version(),
+                session_id=entry.session_id,
+                plan_id=entry.plan_id,
+                batch_id=entry.batch_id,
             )
         )
     return out

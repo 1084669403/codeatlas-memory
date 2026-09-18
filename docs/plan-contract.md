@@ -138,6 +138,21 @@ When disabled, update is report-only and leaves plan Markdown unchanged. Stale
 batches in open plans may be restarted with `plan batch start`; done plans still
 require the explicit `plan batch reopen` transition.
 
+## Context VM scopes and leases
+
+Working-set pages carry optional `session_id`, `plan_id`, and `batch_id`
+identities. Loading, status, budget accounting, prefetch, and eviction accept
+the same three values. A non-empty field narrows the view, so `batch > plan >
+session`; omitting all three selects the compatibility/global working set.
+Rows from other scopes are never counted or evicted by a scoped operation.
+
+Context writes hold a short-lived lease on the deterministic scope identity.
+The lease is stored in `state.db` with an owner token and UTC expiry, is
+released when the operation finishes, and expires so a crashed writer cannot
+block a scope forever. A same-owner acquisition renews the lease; an expired
+foreign lease can be taken over. CLI `context load/status/evict` and MCP
+`context_load/context_status/context_evict` expose equivalent scope options.
+
 ## Plan context
 
 `codeatlas plan context "<task>" --json` returns bounded, deterministic evidence

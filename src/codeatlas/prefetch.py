@@ -18,6 +18,7 @@ from .memory import (
     AmbiguousSymbol,
     Page,
     _is_file_page,
+    entries_for_scope,
     ensure_budget,
     load_budget,
     load_page,
@@ -116,7 +117,14 @@ def neighbors(store: Store, page: Page) -> list[tuple[str, str, int]]:
 
 
 def prefetch(
-    store: Store, page: Page, depth: int = 1, max_pages: int = 10
+    store: Store,
+    page: Page,
+    depth: int = 1,
+    max_pages: int = 10,
+    *,
+    session_id: str = "",
+    plan_id: str = "",
+    batch_id: str = "",
 ) -> list[str]:
     """Prefetch neighbours; returns the page_ids actually loaded.
 
@@ -128,7 +136,12 @@ def prefetch(
     """
     depth = min(depth, MAX_DEPTH)
     b = load_budget(store)
-    entries = store.working_set_entries()
+    entries = entries_for_scope(
+        store,
+        session_id=session_id,
+        plan_id=plan_id,
+        batch_id=batch_id,
+    )
     loaded: list[str] = []
 
     if len(entries) >= b.max_pages:
@@ -138,15 +151,33 @@ def prefetch(
     for candidate_id, granularity, _prio in candidates:
         if len(loaded) >= max_pages or len(loaded) >= depth * max_pages:
             break
-        if len(store.working_set_entries()) >= b.max_pages:
+        if len(entries_for_scope(
+            store,
+            session_id=session_id,
+            plan_id=plan_id,
+            batch_id=batch_id,
+        )) >= b.max_pages:
             break
         try:
-            got = load_page(store, candidate_id, granularity, origin="prefetch")
+            got = load_page(
+                store,
+                candidate_id,
+                granularity,
+                origin="prefetch",
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
         except AmbiguousSymbol:
             continue
         if got is not None:
             loaded.append(got.page_id)
             # EN: keep the working set inside its budget as we go.
             # ZH: 预取过程中保持工作集在预算内。
-            ensure_budget(store)
+            ensure_budget(
+                store,
+                session_id=session_id,
+                plan_id=plan_id,
+                batch_id=batch_id,
+            )
     return loaded
