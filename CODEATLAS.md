@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 16:14
+generated: 2026-09-18 16:17
 language: en
-files: 63
-symbols: 599
-last_scan: 2026-09-18T08:14:24+00:00
+files: 61
+symbols: 594
+last_scan: 2026-09-18T08:17:22+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -16,16 +16,6 @@ last_scan: 2026-09-18T08:14:24+00:00
 ```mermaid
 graph TD
     d___root___f1fabfb4["/"]
-    d__test_tmp_9b1c8f59[".test-tmp"]
-    d___root___f1fabfb4 --> d__test_tmp_9b1c8f59
-    d_4af0b8d9402074bda053_3cd526c3["7ae9a5b9063b4af0b8d9402074bda053"]
-    d__test_tmp_9b1c8f59 --> d_4af0b8d9402074bda053_3cd526c3
-    d_b8d9402074bda053_src_90e0909f["src"]
-    d_4af0b8d9402074bda053_3cd526c3 --> d_b8d9402074bda053_src_90e0909f
-    f_da053_src_handler_py_375ea809["handler.py"]
-    d_b8d9402074bda053_src_90e0909f --> f_da053_src_handler_py_375ea809
-    f_074bda053_src_svc_py_330df13c["svc.py"]
-    d_b8d9402074bda053_src_90e0909f --> f_074bda053_src_svc_py_330df13c
     d_demo_todo_af73008e["demo-todo"]
     d___root___f1fabfb4 --> d_demo_todo_af73008e
     d_demo_todo_app_c6975872["app"]
@@ -183,9 +173,6 @@ flowchart LR
 
 ```mermaid
 classDiagram
-    class c__src_svc_TaskService_d989d0c3 {
-        TaskService
-    }
     class c_oller_TaskController_85e43147 {
         TaskController
     }
@@ -346,8 +333,6 @@ flowchart TD
 
 | File | Lang | Role | Symbols | Ref'd |
 |---|---|---|---:|---:|
-| `.test-tmp/7ae9a5b9063b4af0b8d9402074bda053/src/handler.py` | python | module | 1 | 0 |
-| `.test-tmp/7ae9a5b9063b4af0b8d9402074bda053/src/svc.py` | python | module | 4 | 0 |
 | `demo-todo/app/controllers/task_controller.py` | python | controller | 4 | 0 |
 | `demo-todo/app/main.py` | python | entry | 1 | 0 |
 | `demo-todo/app/models/task.py` | python | model | 3 | 0 |
@@ -412,8 +397,8 @@ flowchart TD
 
 ## Recent Changes
 
+- [2026-09-18_1614.md](.codeatlas/history/2026-09-18_1614.md)
 - [2026-09-18_1547.md](.codeatlas/history/2026-09-18_1547.md)
 - [2026-09-18_1543.md](.codeatlas/history/2026-09-18_1543.md)
 - [2026-09-18_1541.md](.codeatlas/history/2026-09-18_1541.md)
 - [2026-09-18_1533.md](.codeatlas/history/2026-09-18_1533.md)
-- [2026-09-18_1500.md](.codeatlas/history/2026-09-18_1500.md)
