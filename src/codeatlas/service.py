@@ -30,6 +30,7 @@ from .markdown import render_detail_files, render_overview
 from .memory import AmbiguousSymbol, load_page, page_cost  # noqa: F401 (re-export)
 from .models import Page
 from .plan_memory import (
+    ACTIVE_PLAN_STATUSES,
     detect_stale_evidence,
     load_plan_state_config,
     plan_doctor_problems,
@@ -95,6 +96,16 @@ def _mark_stale_passed_batches(root: Path, plans_dir: Path, stale_report: dict) 
             )
             continue
         row = next((entry for entry in plan.batches if str(entry.get("batch", "")) == batch), None)
+        if plan.status not in ACTIVE_PLAN_STATUSES:
+            skipped.append(
+                {
+                    "batch": batch,
+                    "code": "PLAN_NOT_ACTIVE",
+                    "message": "Update-time stale marking only applies to active plans.",
+                    "plan_id": plan_id,
+                }
+            )
+            continue
         if row is None or str(row.get("status", "")) != "passed":
             skipped.append(
                 {

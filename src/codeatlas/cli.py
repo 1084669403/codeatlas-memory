@@ -464,11 +464,12 @@ def plan_stale(
     path: Path = typer.Argument(Path("."), help="Project root."),
     plans_dir: Path = typer.Option(Path("docs/plans"), "--plans-dir", help="Plans directory relative to the project root."),
     json_output: bool = typer.Option(False, "--json", help="Emit deterministic JSON."),
+    all_plans: bool = typer.Option(False, "--all", help="Include historical plan evidence for audit."),
 ) -> None:
     """Detect stale gate evidence without rewriting plans."""
     root = path.resolve()
     try:
-        payload = detect_stale_evidence(root, _plans_dir(root, plans_dir))
+        payload = detect_stale_evidence(root, _plans_dir(root, plans_dir), include_all=all_plans)
     except PlanError as exc:
         err_console.print(f"[red]{exc.code}: {exc.message}[/red]")
         raise typer.Exit(1)
@@ -476,7 +477,8 @@ def plan_stale(
         _print_json(payload)
         return
     if not payload["items"]:
-        console.print("[green]No stale plan evidence detected.[/green]")
+        scope = "active or historical" if all_plans else "active"
+        console.print(f"[green]No stale {scope} plan evidence detected.[/green]")
     for item in payload["items"]:
         console.print(f"[yellow]{item['plan_id']} · {item['batch']} · {item['gate_id']}[/yellow]")
 

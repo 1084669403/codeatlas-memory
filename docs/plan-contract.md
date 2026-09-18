@@ -107,7 +107,11 @@ with the current referenced files, symbols, and gate definitions. Older results
 remain in the audit trail but do not determine the current stale signal. It
 reports stale evidence as bounded JSON and never changes a plan.
 `codeatlas update .` writes `.codeatlas/plans/stale-report.json` with the same
-read-only contract.
+read-only contract. By default, stale detection treats draft, approved,
+executing, and blocked plans as current work and treats done, cancelled, and
+archived plans as historical evidence. Use `codeatlas plan stale --all` for an
+audit view that also includes historical drift; the response marks its scope as
+`active` or `all`. Historical evidence is retained and never rewritten.
 
 `codeatlas doctor` also checks plan lint, dependency cycles, and projection
 drift. A projection can be rebuilt from Markdown; when the two disagree,
@@ -127,11 +131,11 @@ evidence recorded after that restart.
 
 The same rule applies to open plans. `codeatlas update .` compares recorded
 batch input fingerprints and, when `allow_update_plan_state` is true, marks only
-`passed` batches stale through `plan_workflow.mark_batch_stale`. The setting
-defaults to true and may be disabled in `codeatlas.config.json`. When disabled,
-update is report-only and leaves plan Markdown unchanged. Stale batches in open
-plans may be restarted with `plan batch start`; done plans still require the
-explicit `plan batch reopen` transition.
+`passed` batches in active plans stale through `plan_workflow.mark_batch_stale`.
+The setting defaults to true and may be disabled in `codeatlas.config.json`.
+When disabled, update is report-only and leaves plan Markdown unchanged. Stale
+batches in open plans may be restarted with `plan batch start`; done plans still
+require the explicit `plan batch reopen` transition.
 
 ## Plan context
 

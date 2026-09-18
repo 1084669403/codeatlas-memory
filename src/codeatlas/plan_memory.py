@@ -16,6 +16,9 @@ from .plans import Plan, PlanError, is_plan_file, lint_plans, parse_plan, plan_g
 from .storage import Store
 
 
+ACTIVE_PLAN_STATUSES = {"draft", "approved", "executing", "blocked"}
+
+
 def load_plan_state_config(root: str | Path) -> dict[str, Any]:
     """Load the explicit update-time plan-state write authority for one project."""
     root_path = Path(root).resolve()
@@ -146,8 +149,17 @@ def fingerprint_batch_inputs(root: str | Path, plan: Plan, batch: str) -> dict[s
     }
 
 
-def detect_stale_evidence(root: str | Path, plans_dir: str | Path) -> dict[str, Any]:
-    """Detect recorded fingerprints that no longer match their declared inputs."""
+def detect_stale_evidence(
+    root: str | Path,
+    plans_dir: str | Path,
+    *,
+    include_all: bool = False,
+) -> dict[str, Any]:
+    """Detect stale evidence for active plans by default.
+
+    Set ``include_all`` to include historical done, cancelled, and archived
+    plans for audit-only inspection; this function never rewrites evidence.
+    """
     root_path = Path(root).resolve()
     directory = Path(plans_dir)
     if not directory.is_absolute():
@@ -165,6 +177,8 @@ def detect_stale_evidence(root: str | Path, plans_dir: str | Path) -> dict[str, 
             plan = parse_plan(path, root=root_path)
         except PlanError as exc:
             errors.append({"code": exc.code, "message": exc.message, "path": path.as_posix()})
+            continue
+        if not include_all and plan.status not in ACTIVE_PLAN_STATUSES:
             continue
         latest_results: dict[tuple[str, str], dict] = {}
         for result in plan.frontmatter.get("gate_results", []):
@@ -199,6 +213,7 @@ def detect_stale_evidence(root: str | Path, plans_dir: str | Path) -> dict[str, 
                 )
     return {
         "schema_version": 1,
+        "scope": "all" if include_all else "active",
         "items": items,
         "unknown_count": unknown,
         "errors": errors,

@@ -1,10 +1,10 @@
 ---
 project: CodeAtlas
-generated: 2026-09-18 15:00
+generated: 2026-09-18 15:43
 language: en
 files: 61
-symbols: 581
-last_scan: 2026-09-18T07:00:20+00:00
+symbols: 584
+last_scan: 2026-09-18T07:43:33+00:00
 ---
 
 > First time here? Run `codeatlas scan .` to generate the full detail (`.codeatlas/detail/`).
@@ -385,7 +385,7 @@ flowchart TD
 | `tests/test_memory.py` | python | test | 22 | 0 |
 | `tests/test_memory_graph.py` | python | test | 9 | 0 |
 | `tests/test_parser.py` | python | test | 6 | 0 |
-| `tests/test_phase3_plan_impact.py` | python | test | 24 | 0 |
+| `tests/test_phase3_plan_impact.py` | python | test | 27 | 0 |
 | `tests/test_plan_context.py` | python | test | 6 | 0 |
 | `tests/test_plan_engine.py` | python | test | 16 | 0 |
 | `tests/test_plan_workflow.py` | python | test | 18 | 0 |
@@ -397,8 +397,8 @@ flowchart TD
 
 ## Recent Changes
 
+- [2026-09-18_1541.md](.codeatlas/history/2026-09-18_1541.md)
+- [2026-09-18_1533.md](.codeatlas/history/2026-09-18_1533.md)
+- [2026-09-18_1500.md](.codeatlas/history/2026-09-18_1500.md)
 - [2026-09-18_1135.md](.codeatlas/history/2026-09-18_1135.md)
 - [2026-09-18_1112.md](.codeatlas/history/2026-09-18_1112.md)
-- [2026-09-18_1048.md](.codeatlas/history/2026-09-18_1048.md)
-- [2026-09-18_1045.md](.codeatlas/history/2026-09-18_1045.md)
-- [2026-09-18_1043.md](.codeatlas/history/2026-09-18_1043.md)

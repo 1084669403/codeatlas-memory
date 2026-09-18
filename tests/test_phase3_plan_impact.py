@@ -8,12 +8,12 @@ from codeatlas.cli import app
 from codeatlas.indexer import run_scan
 from codeatlas.mcp_server import build_server
 from codeatlas.plan_impact import PlanError, compute_plan_impact
-from codeatlas.plan_memory import load_plan_state_config
+from codeatlas.plan_memory import detect_stale_evidence, load_plan_state_config
 from codeatlas.plan_workflow import approve_plan, complete_batch, create_plan, record_gate_result, revise_plan, start_batch
 from codeatlas.plans import find_plan
 from codeatlas.service import plan_impact as service_plan_impact
 from codeatlas.plan_memory import plan_doctor_warnings
-from codeatlas.service import scan_project, update_project
+from codeatlas.service import _mark_stale_passed_batches, scan_project, update_project
 from codeatlas.storage import Store
 
 
@@ -626,8 +626,8 @@ def test_invalid_plan_state_config_is_rejected(tmp_path):
 
 
 def test_update_marks_passed_affected_batch_stale(sample_project):
-    plan = _completed_update_plan(sample_project)
-    target = sample_project / "tests" / "test_stale_write.py"
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
     target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
 
     outcome = update_project(sample_project)
@@ -639,20 +639,20 @@ def test_update_marks_passed_affected_batch_stale(sample_project):
             "batch": "B1",
             "gates": ["unit-tests"],
             "plan_id": plan.id,
-            "revision": 6,
-            "snapshot_path": f"docs/plans/revisions/{plan.id}/0006.md",
+            "revision": 7,
+            "snapshot_path": f"docs/plans/revisions/{plan.id}/0007.md",
         }
     ]
     refreshed = find_plan(plan.id, plan.path.parent, root=sample_project)
     assert refreshed.batches[0]["status"] == "stale"
-    assert refreshed.frontmatter["revision"] == 6
+    assert refreshed.frontmatter["revision"] == 7
     assert refreshed.frontmatter["stale_evidence"][-1]["batch"] == "B1"
-    assert refreshed.frontmatter["status"] == "done"
+    assert refreshed.frontmatter["status"] == "executing"
 
 
 def test_update_without_write_authority_is_report_only(sample_project):
-    plan = _completed_update_plan(sample_project)
-    target = sample_project / "tests" / "test_stale_write.py"
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
     target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
     (sample_project / "codeatlas.config.json").write_text(
         '{"allow_update_plan_state": false}\n', encoding="utf-8"
@@ -678,8 +678,8 @@ def test_update_without_write_authority_is_report_only(sample_project):
 
 
 def test_update_does_not_remark_stale_batch(sample_project):
-    plan = _completed_update_plan(sample_project)
-    target = sample_project / "tests" / "test_stale_write.py"
+    plan = _open_plan_with_completed_batch(sample_project)
+    target = sample_project / "tests" / "test_stale_restart.py"
     target.write_text("def test_first_task():\n    assert True\n    assert True\n", encoding="utf-8")
     update_project(sample_project)
 
@@ -696,6 +696,49 @@ def test_update_does_not_remark_stale_batch(sample_project):
     assert refreshed.path.read_bytes() == before
     assert refreshed.frontmatter["revision"] == revision
     assert len(refreshed.frontmatter["stale_evidence"]) == evidence_count
+
+
+def test_update_stale_marking_scopes_to_active_plans(sample_project):
+    active = _open_plan_with_completed_batch(sample_project)
+    historical = _completed_update_plan(sample_project)
+    (sample_project / "tests" / "test_stale_restart.py").write_text(
+        "def test_first_task():\n    assert True\n    assert True\n",
+        encoding="utf-8",
+    )
+    (sample_project / "tests" / "test_stale_write.py").write_text(
+        "def test_first_task():\n    assert True\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    outcome = update_project(sample_project)
+
+    marking = outcome.plan_state_report
+    assert marking["allow_update_plan_state"] is True
+    assert [item["plan_id"] for item in marking["marked"]] == [active.id]
+    assert marking["skipped"] == []
+    active_refreshed = find_plan(active.id, active.path.parent, root=sample_project)
+    historical_refreshed = find_plan(
+        historical.id,
+        historical.path.parent,
+        root=sample_project,
+    )
+    assert active_refreshed.batches[0]["status"] == "stale"
+    assert historical_refreshed.batches[0]["status"] == "passed"
+    assert "stale_evidence" not in historical_refreshed.frontmatter
+
+    audit_items = detect_stale_evidence(
+        sample_project,
+        sample_project / "docs" / "plans",
+        include_all=True,
+    )["items"]
+    historical_items = [item for item in audit_items if item["plan_id"] == historical.id]
+    defense = _mark_stale_passed_batches(
+        sample_project,
+        sample_project / "docs" / "plans",
+        {"items": historical_items},
+    )
+
+    assert [item["code"] for item in defense["skipped"]] == ["PLAN_NOT_ACTIVE"]
 
 
 def test_stale_detection_uses_latest_gate_evidence(sample_project):
@@ -739,6 +782,60 @@ def test_stale_detection_uses_latest_gate_evidence(sample_project):
 
     assert outcome.plan_state_report["marked"] == []
     assert refreshed.batches[0]["status"] == "passed"
+
+
+def test_plan_stale_defaults_to_active_plans(sample_project):
+    active = _open_plan_with_completed_batch(sample_project)
+    historical = _completed_update_plan(sample_project)
+    (sample_project / "tests" / "test_stale_restart.py").write_text(
+        "def test_first_task():\n    assert True\n    assert True\n",
+        encoding="utf-8",
+    )
+    (sample_project / "tests" / "test_stale_write.py").write_text(
+        "def test_first_task():\n    assert True\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    report = detect_stale_evidence(sample_project, sample_project / "docs" / "plans")
+
+    active_current = find_plan(active.id, active.path.parent, root=sample_project)
+    historical_current = find_plan(historical.id, historical.path.parent, root=sample_project)
+    assert active_current.status == "executing"
+    assert historical_current.status == "done"
+    assert [item["plan_id"] for item in report["items"]] == [active.id]
+
+    runner = CliRunner()
+    cli_default = runner.invoke(app, ["plan", "stale", str(sample_project), "--json"])
+    cli_audit = runner.invoke(app, ["plan", "stale", str(sample_project), "--all", "--json"])
+
+    assert cli_default.exit_code == 0, cli_default.output
+    assert json.loads(cli_default.output)["items"] == report["items"]
+    assert cli_audit.exit_code == 0, cli_audit.output
+    assert {
+        item["plan_id"] for item in json.loads(cli_audit.output)["items"]
+    } == {active.id, historical.id}
+
+
+def test_plan_stale_include_all_reports_historical_evidence(sample_project):
+    historical = _completed_update_plan(sample_project)
+    (sample_project / "tests" / "test_stale_write.py").write_text(
+        "def test_first_task():\n    assert True\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    default = detect_stale_evidence(sample_project, sample_project / "docs" / "plans")
+    audit = detect_stale_evidence(
+        sample_project,
+        sample_project / "docs" / "plans",
+        include_all=True,
+    )
+
+    historical_current = find_plan(historical.id, historical.path.parent, root=sample_project)
+    assert historical_current.status == "done"
+    assert default["scope"] == "active"
+    assert audit["scope"] == "all"
+    assert default["items"] == []
+    assert [item["plan_id"] for item in audit["items"]] == [historical.id]
 
 
 def test_stale_batch_can_restart_for_fresh_evidence(sample_project):
